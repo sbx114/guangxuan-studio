@@ -1,8 +1,8 @@
 {
   "name": "guangxuan-studio",
   "productName": "光宣工作台",
-  "version": "0.1.0",
-  "description": "面向学院宣传的一站式 AI 内容生产与审核桌面应用",
+  "version": "0.2.0",
+  "description": "AI 文案、项目档案与原生视频剪辑桌面工作台",
   "type": "module",
   "main": "desktop/main.cjs",
   "license": "MIT",
@@ -18,7 +18,8 @@
     "web": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
     "build:home": "node scripts/build-rhine-home.mjs",
-    "build:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1"
+    "package:openfilm": "node scripts/package-openfilm-runtime.mjs",
+    "build:win": "powershell -NoProfile -File scripts/build-windows.ps1"
   },
   "config": {
     "electronRuntimeVersion": "45.3.3"
@@ -29,6 +30,7 @@
   "dependencies": {
     "@remotion/bundler": "4.0.543",
     "@remotion/renderer": "4.0.543",
+    "playwright-core": "1.61.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "remotion": "4.0.543"

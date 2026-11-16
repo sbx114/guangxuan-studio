@@ -34,6 +34,7 @@ import {
   archiveColumns,
   columnFiles,
   fileLocation,
+  setProjects, mergeProject, projectsReady, type ArchiveRecord,
 } from "./data";
 import { TerminalAudio } from "./audio";
 import { audioSettingsMarkup } from "./audio-settings";
@@ -72,7 +73,8 @@ let wallpaperEffects: WallpaperEffects | undefined;
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
   document.querySelector<T>(selector)!;
 import { logo, brandHeading } from "./brand";
-import { embeddedPortal, portalReady, openPortalView } from "./portal-bridge";
+import { embeddedPortal, portalReady, openPortalView, fromPortalParent, sendPortalMessage } from "./portal-bridge";
+import { projectDetailsMarkup } from "./project-details";
 import "./guangxuan.css";
 
 $("#stage").innerHTML = `
@@ -82,6 +84,7 @@ $("#stage").innerHTML = `
   <header class="brand">${brandHeading}</header>
   <nav class="system-nav" aria-label="系统导航">
     <button data-action="search"><span class="nav-glyph">⌕</span> 索引 <span class="key">/</span></button>
+    <button data-action="new-project" aria-label="新建项目">＋ 新建</button>
     <button data-action="projects" aria-label="项目档案">项目 <span id="saved-count" hidden>00</span></button>
     <button data-action="connection" aria-label="模型连接">模型</button>
     <button class="settings-button" data-action="settings" aria-label="系统设置" title="系统设置"><span class="settings-glyph" aria-hidden="true">◷</span><span class="settings-label">设置</span></button>
@@ -96,9 +99,10 @@ $("#stage").innerHTML = `
   </section>
   <svg id="inspection-marks" viewBox="0 0 1920 1080" aria-hidden="true"><path id="inspection-lines"/><g id="inspection-corners"></g><circle id="inspection-point" r="1.8"/></svg>
   <div id="inspection-text" aria-hidden="true">WORKSPACE:<strong>LOCAL CREATIVE TOOLS</strong></div>
-  <section id="archive-ui" class="archive-ui" aria-label="档案选择">
-    <div class="archive-callout"><div class="eyebrow">CREATIVE WORKSPACE <span>／</span> <span id="archive-category">视频剪辑</span></div><button class="file-title" data-action="open">FILE NUMBER: <span id="selected-id">X-<span id="selected-code">001</span></span><span class="file-open">↗</span></button><div class="callout-rule"><i></i></div><div class="file-summary"><span id="selected-title">光宣工作台</span><span id="selected-clearance">BUSINESS AREA</span></div><button class="read-file" data-action="open">进入 <span>→</span></button></div>
-    <div id="hover-label" class="hover-label" hidden>X-<span id="hover-code">001</span> / <span id="hover-title"></span></div>
+  <section id="archive-ui" class="archive-ui" aria-label="项目档案">
+    <div id="project-empty" class="project-empty"><h2 id="project-empty-title">正在读取项目</h2><button class="solid-button" data-action="new-project">新建项目 <span>＋</span></button><button class="project-sync" data-action="sync-projects">刷新项目</button></div>
+    <div class="archive-callout"><div class="eyebrow">CREATIVE WORKSPACE <span>／</span> <span id="archive-category">视频剪辑</span></div><button class="file-title" data-action="open">FILE NUMBER: <span id="selected-id">P-<span id="selected-code">001</span></span><span class="file-open">↗</span></button><div class="callout-rule"><i></i></div><div class="file-summary"><span id="selected-title">光宣工作台</span><span id="selected-clearance">BUSINESS AREA</span></div><button class="read-file" data-action="open">进入 <span>→</span></button></div>
+    <div id="hover-label" class="hover-label" hidden>P-<span id="hover-code">001</span> / <span id="hover-title"></span></div>
     <div class="archive-counter"><span class="tiny-label">ARCHIVE / SELECT</span><div><span id="selected-number">01</span><i>/</i><span class="count-total">12</span></div></div>
     <div class="archive-navigation"><button data-action="prev" aria-label="上一个档案">↑</button><div id="file-ticks" class="file-ticks"></div><button data-action="next" aria-label="下一个档案">↓</button></div>
     <div class="column-navigation"><button data-action="column-prev" aria-label="上一列">←</button><div><span id="column-number">COLUMN <span id="column-index">03</span> / 05</span><strong id="column-name">视频剪辑</strong></div><button data-action="column-next" aria-label="下一列">→</button></div>
@@ -127,7 +131,7 @@ $("#viewport").insertAdjacentHTML(
 
 type Mode = "boot" | "archive" | "detail";
 let mode: Mode = "boot",
-  selected = 0,
+  selected = -1,
   bootStart = 0,
   lastStep = "",
   ready = false;
@@ -137,8 +141,45 @@ let modal: "search" | "saved" | "settings" | null = null,
 let activeTab = "overview";
 const reviewParams = new URLSearchParams(location.search);
 const portalBootRate = 6.4;
-let portalOpenTimer: ReturnType<typeof setTimeout> | undefined;
-let portalOpening = false;
+let detailDirty = false;
+let editorLoadingId: string | null = null;
+let pendingSave: { requestId: string; projectId: string; title: string; description: string; resolve: (record: ArchiveRecord) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+let requestedVisible = true;
+let renderActive = !document.hidden;
+let hiddenAt: number | null = renderActive ? null : performance.now();
+let suspendedSeconds = 0;
+let frameHandle: number | null = null;
+let interactionUntil = 0;
+let lastFrameAt = 0;
+let publishedHomeState = "";
+const timelineNow = () => (renderActive || hiddenAt === null ? performance.now() : hiddenAt) / 1000 - suspendedSeconds;
+function interact(duration = 2000) { interactionUntil = Math.max(interactionUntil, performance.now() + duration); }
+function scheduleFrame() { if (started && renderActive && frameHandle === null) frameHandle = requestAnimationFrame(frame); }
+function syncRenderVisibility() {
+  const visible = requestedVisible && !document.hidden;
+  if (visible === renderActive) return;
+  renderActive = visible;
+  $("#three-scene").dataset.renderPaused = String(!visible);
+  if (!visible) {
+    hiddenAt = performance.now();
+    if (frameHandle !== null) cancelAnimationFrame(frameHandle);
+    frameHandle = null;
+    rollingTitles.forEach(title => title.finish()); selectedCode.finish(); hoverCode.finish(); fileCounter.finish(); columnCounter.finish();
+    audio.setHostPaused(true);
+    $("#three-scene").dataset.fps = "0";
+  } else {
+    if (hiddenAt !== null) suspendedSeconds += (performance.now() - hiddenAt) / 1000;
+    hiddenAt = null; scene?.setTimelineOffset(suspendedSeconds); audio.setHostPaused(false);
+    frameStart = performance.now(); frameCount = 0; lastFrameAt = 0; interact(1600); scheduleFrame();
+  }
+}
+function publishHomeState() {
+  if (mode === "boot" || !projectsReady) return;
+  const identity = mode + ":" + (records[selected]?.id || "");
+  if (identity === publishedHomeState) return;
+  publishedHomeState = identity;
+  sendPortalMessage({ type: "guangxuan:home-state", mode, projectId: records[selected]?.id });
+}
 function portalBootTime(elapsed: number) { return 1.76 + Math.max(0, elapsed - 1.76) * portalBootRate; }
 let frozenTime =
   reviewParams.get("freeze") === "1"
@@ -192,6 +233,7 @@ const storedPrefs = readLocal<
     rendering: RenderQuality;
     superPerformance: boolean;
     colorTheme: "light" | "dark";
+    qualityExplicit: boolean;
     motion: StoredMotion;
     motionPreset: MotionPreset;
   }>
@@ -204,6 +246,7 @@ const initialMotion = createMotionPreferences(
       : undefined),
 );
 const initialMotionPreset = motionPresetFor(initialMotion);
+const oldDefaultQuality = storedPrefs.rendering && !storedPrefs.qualityExplicit && Object.entries(qualityPresets.original).every(([key, value]) => storedPrefs.rendering?.[key as keyof RenderQuality] === value);
 const prefs = {
   sound: storedPrefs.sound ?? false,
   music: storedPrefs.music ?? false,
@@ -213,8 +256,9 @@ const prefs = {
   motionPreset: initialMotionPreset,
   quality: storedPrefs.quality ?? true,
   superPerformance: storedPrefs.superPerformance ?? false,
+  qualityExplicit: storedPrefs.qualityExplicit ?? false,
   rendering: normalizeQuality(
-    storedPrefs.rendering,
+    oldDefaultQuality ? undefined : storedPrefs.rendering,
     storedPrefs.quality !== false,
   ),
   colorTheme: storedPrefs.colorTheme === "dark" ? "dark" : "light",
@@ -323,8 +367,9 @@ let resumeCell: { lane: number; row: number } | undefined;
 let resumeSelection = -1;
 let viewer: ModelViewer | undefined;
 const accessLog: { id: string; time: string }[] = [];
-const columnMemory = archiveColumns.map((_, lane) => columnFiles(lane)[0]);
+let columnMemory = archiveColumns.map(() => -1);
 function recordAccess() {
+  if (!records[selected]) return;
   accessLog.unshift({
     id: records[selected].id,
     time: new Date().toLocaleTimeString("en-GB"),
@@ -479,15 +524,11 @@ window.visualViewport?.addEventListener("resize", fit);
 window.visualViewport?.addEventListener("scroll", fit);
 matchMedia("(pointer: coarse)").addEventListener("change", fit);
 fit();
-$("#file-ticks").innerHTML = columnFiles(fileLocation(selected).lane)
-  .map((index) => `<button data-select="${index}"></button>`)
-  .join("");
-const fileTicks = [
-  ...$("#file-ticks").querySelectorAll<HTMLButtonElement>("button"),
-];
+let fileTicks: HTMLButtonElement[] = [];
 
 function setMode(next: Mode) {
-  if (next !== "detail") { clearTimeout(portalOpenTimer); portalOpening = false; }
+  if (next === "detail" && !records[selected]) next = "archive";
+  interact();
   if (workbench?.enabled && next === "detail") next = "archive";
   const previousMode = mode;
   rollingTitles.forEach((title) =>
@@ -502,6 +543,7 @@ function setMode(next: Mode) {
   }
   if (next === "detail" && mode !== "detail") recordAccess();
   mode = next;
+  publishHomeState();
   syncWallpaperBackground();
   audio.setScene(next);
   if (next !== "boot" && audioPreview) {
@@ -555,127 +597,82 @@ function setMode(next: Mode) {
   }
 }
 function select(index: number, navigation?: ArchiveNavigation) {
-  selected = (index + records.length) % records.length;
-  columnMemory[fileLocation(selected).lane] = selected;
+  if (!Number.isInteger(index) || !records[index]) return;
+  selected = index; columnMemory[fileLocation(selected).lane] = selected;
   if (mode === "detail") setMode("archive");
-  activeTab = "overview";
-  scene?.select(selected, navigation);
-  updateSelection(navigation);
-  const columnMove =
-    navigation && "axis" in navigation && navigation.axis === "lane";
-  audio.play(
-    columnMove ? "column" : "tick",
-    columnMove ? navigation.direction * 0.45 : 0,
-  );
+  detailDirty = false; activeTab = "overview";
+  scene?.select(selected, navigation); updateSelection(navigation); interact(); publishHomeState();
+  const columnMove = navigation && "axis" in navigation && navigation.axis === "lane";
+  audio.play(columnMove ? "column" : "tick", columnMove ? navigation.direction * 0.45 : 0);
 }
 function stepFile(direction: number) {
+  if (!records.length) return;
   const files = columnFiles(fileLocation(selected).lane);
   if (files.length < 2) return;
-  select(
-    files[(files.indexOf(selected) + direction + files.length) % files.length],
-    { axis: "row", direction },
-  );
+  select(files[(files.indexOf(selected) + direction + files.length) % files.length], { axis: "row", direction });
 }
 function stepColumn(direction: number) {
-  const lane = fileLocation(selected).lane;
-  const next = wrap(lane + direction, archiveColumns.length);
-  select(columnMemory[next], { axis: "lane", direction });
+  if (!records.length) return;
+  const lanes = archiveColumns.map((_, lane) => lane).filter(lane => columnFiles(lane).length);
+  const current = lanes.indexOf(fileLocation(selected).lane);
+  const lane = lanes[(current + direction + lanes.length) % lanes.length];
+  const files = columnFiles(lane);
+  select(files.includes(columnMemory[lane]) ? columnMemory[lane] : files[0], { axis: "lane", direction });
 }
 function updateSelection(navigation?: ArchiveNavigation) {
   const r = records[selected];
-  const { lane } = fileLocation(selected);
-  const files = columnFiles(lane);
+  const stage = $("#stage"); stage.dataset.empty = String(!records.length); stage.dataset.projectsReady = String(projectsReady);
+  $("#project-empty-title").textContent = projectsReady ? "还没有项目" : "正在读取项目";
+  if (!r) {
+    selectionTitle.update({ text: "项目档案", animated: false });
+    clearanceTitle.update({ text: "", animated: false }); categoryTitle.update({ text: "", animated: false });
+    selectedCode.update({ value: 0, animated: false }); fileCounter.update({ value: 0, animated: false });
+    $(".count-total").textContent = "00"; $("#file-ticks").replaceChildren(); fileTicks = [];
+    for (const action of ["prev", "next", "column-prev", "column-next", "open"]) document.querySelectorAll<HTMLButtonElement>('[data-action="' + action + '"]').forEach(button => { button.disabled = true; });
+    return;
+  }
+  const { lane } = fileLocation(selected), files = columnFiles(lane);
+  const animated = renderActive && motionActive("rollingText") && mode === "archive";
+  selectionTitle.update({ text: r.title, animated }); clearanceTitle.update({ text: r.category, animated }); categoryTitle.update({ text: "项目档案", animated });
+  const direction = navigation && "axis" in navigation ? navigation.direction > 0 ? "up" : "down" : "auto";
+  selectedCode.update({ value: selected + 1, animated: renderActive && motionActive("rollingNumbers") && mode === "archive", direction });
+  fileCounter.update({ value: files.indexOf(selected) + 1, animated: renderActive && motionActive("rollingNumbers") && mode === "archive", direction: navigation && "axis" in navigation && navigation.axis === "row" ? direction : "auto" });
+  $(".count-total").textContent = String(files.length).padStart(2, "0");
+  columnCounter.update({ value: lane + 1, animated: renderActive && motionActive("rollingNumbers") && mode === "archive", direction: navigation && "axis" in navigation && navigation.axis === "lane" ? direction : "auto" });
+  columnTitle.update({ text: archiveColumns[lane], animated });
   $<HTMLButtonElement>('[data-action="prev"]').disabled = files.length < 2;
   $<HTMLButtonElement>('[data-action="next"]').disabled = files.length < 2;
-  $(".read-file").firstChild!.textContent = r.status === "planned" ? "查看规划 " : "进入 ";
-  selectionTitle.update({
-    text: r.title,
-    animated: motionActive("rollingText") && mode === "archive",
-  });
-  clearanceTitle.update({
-    text: r.clearance,
-    animated: motionActive("rollingText") && mode === "archive",
-  });
-  categoryTitle.update({
-    text: r.category,
-    animated: motionActive("rollingText") && mode === "archive",
-  });
-  const direction =
-    navigation && "axis" in navigation
-      ? navigation.direction > 0
-        ? "up"
-        : "down"
-      : "auto";
-  selectedCode.update({
-    value: Number(r.id.slice(2)),
-    animated: motionActive("rollingNumbers") && mode === "archive",
-    direction,
-  });
-  fileCounter.update({
-    value: files.indexOf(selected) + 1,
-    animated: motionActive("rollingNumbers") && mode === "archive",
-    direction:
-      navigation && "axis" in navigation && navigation.axis === "row"
-        ? direction
-        : "auto",
-  });
-  $(".count-total").textContent = String(files.length).padStart(2, "0");
-  columnCounter.update({
-    value: lane + 1,
-    animated: motionActive("rollingNumbers") && mode === "archive",
-    direction:
-      navigation && "axis" in navigation && navigation.axis === "lane"
-        ? direction
-        : "auto",
-  });
-  columnTitle.update({
-    text: archiveColumns[lane],
-    animated: motionActive("rollingText") && mode === "archive",
-  });
-  $<HTMLButtonElement>('[data-action="column-prev"]').disabled = false;
-  $<HTMLButtonElement>('[data-action="column-next"]').disabled = false;
-  fileTicks.forEach((button, slot) => {
-    const index = files[slot],
-      record = records[index];
-    button.dataset.select = String(index);
-    button.setAttribute("aria-label", `选择档案 ${record.id} ${record.title}`);
-    button.title = `${record.id} · ${record.title}`;
-    button.classList.toggle("selected", index === selected);
-    button.setAttribute("aria-pressed", String(index === selected));
-  });
-  $("#saved-count").textContent = String(saved.size).padStart(2, "0");
+  const activeColumns = archiveColumns.filter((_, index) => columnFiles(index).length).length;
+  $<HTMLButtonElement>('[data-action="column-prev"]').disabled = activeColumns < 2;
+  $<HTMLButtonElement>('[data-action="column-next"]').disabled = activeColumns < 2;
+  document.querySelectorAll<HTMLButtonElement>('[data-action="open"]').forEach(button => { button.disabled = false; });
+  $(".read-file").firstChild!.textContent = "项目信息 ";
+  const offset = Math.max(0, files.indexOf(selected) - 4);
+  $("#file-ticks").innerHTML = files.slice(offset, offset + 9).map(index => '<button data-select="' + index + '" aria-label="选择项目"></button>').join("");
+  fileTicks = [...$("#file-ticks").querySelectorAll<HTMLButtonElement>("button")];
+  fileTicks.forEach(button => { const index = Number(button.dataset.select); const record = records[index]; button.title = record.title; button.setAttribute("aria-label", "选择项目 " + record.title); button.classList.toggle("selected", index === selected); button.setAttribute("aria-pressed", String(index === selected)); });
+  $("#saved-count").textContent = String(records.length).padStart(2, "0");
 }
 function replayBoot(forcePreview = false) {
   if (!ready) return;
   closeModal(() => replayBootAfterModal(forcePreview));
 }
 function replayBootAfterModal(forcePreview: boolean) {
-  bootStart = performance.now() / 1000 - 1.76;
+  bootStart = timelineNow() - 1.76;
   frozenTime = null;
   lastStep = "";
   setMode(!motionActive("boot") && !forcePreview ? "archive" : "boot");
   audio.restartBoot();
-  scene?.select(0);
-  selected = 0;
+  selected = records.length ? Math.max(0, selected) : -1;
+  scene?.select(selected);
   updateSelection();
   if (!forcePreview) audio.play("ui-tick");
 }
 function openFile() {
-  if (!ready || portalOpening) return;
-  const record = records[selected];
-  closeModal(() => {
-    setMode("detail");
-    audio.play("open");
-    if (!record.view) return;
-    portalOpening = true;
-    const delay = motionActive("modelDecryption") || motionActive("surfaceTransitions") ? 900 : 0;
-    portalOpenTimer = setTimeout(() => {
-      portalOpening = false;
-      if (mode !== "detail") return;
-      if (!openPortalView(record.view)) notify("请从光宣工作台打开此模块");
-    }, delay);
-  });
+  if (!ready || !records[selected]) return;
+  closeModal(() => { detailDirty = false; setMode("detail"); audio.play("open"); interact(2500); });
 }
+
 function toggleSaved() {
   const id = records[selected].id;
   if (saved.has(id)) saved.delete(id);
@@ -700,36 +697,99 @@ function toggleSaved() {
   audio.play("confirm");
   notify(saved.has(id) ? "档案已加入收藏" : "已取消收藏");
 }
-function renderDetail() {
+function renderDetail(clear = false) {
   tabTransition.cancel();
-  const r = records[selected];
-  $("#object-id").textContent = "NO." + String(selected + 1).padStart(3, "0");
-  $("#detail-content").innerHTML = `
-  <div class="detail-kicker"><span>FILE ${r.id}</span><span>${escapeHtml(r.clearance)}</span></div>
-  <h2>${escapeHtml(r.en)}</h2><div class="detail-title-cn">${escapeHtml(r.title)}<span>${escapeHtml(r.category)}</span></div>
-  <div class="detail-rule"></div>
-  <dl class="metadata"><div><dt>MODULE / 模块</dt><dd>${escapeHtml(r.department)}</dd></div><div><dt>WORKSPACE / 工作区</dt><dd>${escapeHtml(r.date)}</dd></div><div><dt>APPLICATION / 应用</dt><dd>${escapeHtml(r.lead)}</dd></div><div><dt>STATUS / 状态</dt><dd><i></i>${r.status === "planned" ? "规划中" : "可用"}</dd></div></dl>
-  <div class="detail-tabs" role="tablist"><button id="tab-overview" class="active" role="tab" aria-controls="tab-panel" aria-selected="true" data-tab="overview">01 <span>概述</span></button><button id="tab-notes" role="tab" aria-controls="tab-panel" aria-selected="false" data-tab="notes">02 <span>功能说明</span></button><button id="tab-history" role="tab" aria-controls="tab-panel" aria-selected="false" data-tab="history">03 <span>访问日志</span></button><i class="tab-indicator" aria-hidden="true"></i></div>
-  <div id="tab-panel" class="tab-panel" role="tabpanel">${overview()}</div>
-  <div class="detail-actions"><button class="solid-button portal-launch" data-action="launch" ${r.view ? "" : "disabled"}>${r.view ? "进入工作区" : "规划中"}<span>→</span></button><button class="solid-button" data-action="bookmark">${saved.has(r.id) ? "− REMOVE FROM SAVED" : "＋ SAVE ARCHIVE"}<span>${saved.has(r.id) ? "已收藏" : "收藏档案"}</span></button></div>
-  <div class="detail-footnote"><a href="${escapeHtml(r.source)}" target="_blank" rel="noopener">设定参考 ↗</a><span>${String(selected + 1).padStart(3, "0")} / ${String(records.length).padStart(3, "0")}</span></div>`;
+  const record = records[selected]; if (!record) return;
+  $("#object-id").textContent = "PROJECT " + String(selected + 1).padStart(3, "0");
+  $("#detail-content").innerHTML = projectDetailsMarkup(record, selected + 1);
   $("#detail-content").setAttribute("tabindex", "-1");
-  $('[data-action="bookmark"]').setAttribute(
-    "aria-pressed",
-    String(saved.has(r.id)),
-  );
-  documentDecryption.reset(
-    $("#detail-content"),
-    !motionActive("documentReveal") ||
-      !scene ||
-      scene.decryptionFrame.phase === "clear",
-  );
-  setTab(activeTab, false);
+  const form = $<HTMLFormElement>("#project-details-form");
+  form.addEventListener("input", () => { detailDirty = true; updateDetailButtons(); });
+  form.addEventListener("submit", event => { event.preventDefault(); void saveProjectDetails().catch(error => detailNotice(error.message, true)); });
+  documentDecryption.reset($("#detail-content"), clear || !motionActive("documentReveal") || !scene || scene.decryptionFrame.phase === "clear");
+  updateDetailButtons();
 }
+function detailNotice(message: string, error = false) {
+  const status = document.querySelector<HTMLElement>("#project-save-status");
+  if (status) { status.textContent = message; status.classList.toggle("is-error", error); }
+}
+function updateDetailButtons() {
+  const record = records[selected];
+  const save = document.querySelector<HTMLButtonElement>("#save-project-details");
+  const edit = document.querySelector<HTMLButtonElement>("#edit-project");
+  const saving = Boolean(record && pendingSave?.projectId === record.id);
+  if (save) { save.disabled = !detailDirty || saving; save.textContent = saving ? "正在保存…" : "保存信息"; }
+  if (edit) { const preparing = editorLoadingId === record?.id; edit.disabled = saving || preparing; edit.innerHTML = preparing ? "正在准备编辑器…" : (detailDirty ? "保存并进入编辑" : "进入编辑") + "<span>→</span>"; }
+}
+function saveProjectDetails(): Promise<ArchiveRecord> {
+  const record = records[selected];
+  if (!record) return Promise.reject(new Error("项目不存在。"));
+  if (pendingSave) return Promise.reject(new Error("正在等待上一次保存结果。"));
+  const title = $<HTMLInputElement>("#project-name").value.trim();
+  const description = $<HTMLTextAreaElement>("#project-description").value.trim();
+  if (!title || title.length > 120 || description.length > 1000) return Promise.reject(new Error("名称需为1—120字，简介最多1000字。"));
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { if (pendingSave?.requestId === requestId) { pendingSave = null; updateDetailButtons(); reject(new Error("保存尚未确认，请重试。输入内容仍保留。")); } }, 15000);
+    pendingSave = { requestId, projectId: record.id, title, description, resolve, reject, timer };
+    if (!sendPortalMessage({ type: "guangxuan:update-project", projectId: record.id, title, description, requestId })) { clearTimeout(timer); pendingSave = null; reject(new Error("请在光宣工作台中保存项目。")); }
+    updateDetailButtons();
+  });
+}
+async function editCurrentProject() {
+  const projectId = records[selected]?.id; if (!projectId || editorLoadingId) return;
+  try {
+    if (detailDirty) await saveProjectDetails();
+    if (mode !== "detail" || records[selected]?.id !== projectId) return;
+    if (!sendPortalMessage({ type: "guangxuan:edit-project", projectId })) throw new Error("请在光宣工作台中进入编辑。 ");
+    editorLoadingId = projectId; updateDetailButtons();
+  } catch (error) { detailNotice((error as Error).message, true); }
+}
+function receiveProjects(value: unknown, preferredId?: string) {
+  if (!Array.isArray(value)) return;
+  const previousId = records[selected]?.id; const wasDetail = mode === "detail";
+  const draft = wasDetail && detailDirty ? { title: document.querySelector<HTMLInputElement>("#project-name")?.value, description: document.querySelector<HTMLTextAreaElement>("#project-description")?.value } : null;
+  setProjects(value);
+  const id = preferredId && records.some(record => record.id === preferredId) ? preferredId : previousId;
+  selected = records.findIndex(record => record.id === id); if (selected < 0 && records.length) selected = 0;
+  columnMemory = archiveColumns.map((_, lane) => columnFiles(lane)[0] ?? -1);
+  scene?.syncProjects(selected); updateSelection(); interact();
+  if (wasDetail) {
+    if (!records[selected] || records[selected].id !== previousId) { detailDirty = false; setMode("archive"); }
+    else { renderDetail(true); if (draft) { $<HTMLInputElement>("#project-name").value = draft.title || ""; $<HTMLTextAreaElement>("#project-description").value = draft.description || ""; detailDirty = true; updateDetailButtons(); } }
+  }
+  if (modal && modal !== "settings") renderResults();
+  publishHomeState();
+}
+window.addEventListener("message", event => {
+  if (!fromPortalParent(event)) return;
+  const message = event.data;
+  if (message.type === "guangxuan:projects") receiveProjects(message.projects, typeof message.selectedId === "string" ? message.selectedId : undefined);
+  else if (message.type === "guangxuan:visibility" && typeof message.visible === "boolean") { requestedVisible = message.visible; if (message.visible) { editorLoadingId = null; updateDetailButtons(); } syncRenderVisibility(); }
+  else if (message.type === "guangxuan:select-project" && typeof message.projectId === "string") { const index = records.findIndex(record => record.id === message.projectId); if (index >= 0) { if (index !== selected || mode !== "detail") select(index); if (message.detail === true) openFile(); } }
+  else if (message.type === "guangxuan:editor-status" && typeof message.projectId === "string") { editorLoadingId = message.loading ? message.projectId : null; if (message.error && records[selected]?.id === message.projectId) detailNotice(String(message.error).slice(0, 1000), true); updateDetailButtons(); }
+  else if (message.type === "guangxuan:project-updated" && pendingSave && message.requestId === pendingSave.requestId) {
+    const pending = pendingSave; pendingSave = null; clearTimeout(pending.timer);
+    if (message.error) { pending.reject(new Error(String(message.error).slice(0, 1000))); updateDetailButtons(); return; }
+    const updated = mergeProject(message.project && message.project.id === pending.projectId ? message.project : { id: pending.projectId, title: pending.title, description: pending.description });
+    if (!updated) { pending.reject(new Error("项目已不可用，请刷新档案。")); updateDetailButtons(); return; }
+    if (records[selected]?.id === updated.id) {
+      const name = document.querySelector<HTMLInputElement>("#project-name"), description = document.querySelector<HTMLTextAreaElement>("#project-description");
+      detailDirty = Boolean(name && (name.value.trim() !== pending.title || description?.value.trim() !== pending.description));
+      if (!detailDirty && mode === "detail") renderDetail(true);
+      detailNotice("已保存"); scene?.syncProjects(selected); updateSelection();
+    }
+    pending.resolve(updated); updateDetailButtons();
+  }
+});
+document.addEventListener("visibilitychange", syncRenderVisibility);
+for (const name of ["pointerdown", "pointermove", "wheel", "keydown", "input"] as const) document.addEventListener(name, () => interact(), { passive: true });
+
 function overview() {
-  return `<div class="panel-label">ABSTRACT / 摘要</div><p>${escapeHtml(records[selected].abstract)}</p>`;
+  return records[selected] ? `<div class="panel-label">项目简介</div><p>${escapeHtml(records[selected].abstract)}</p>` : "";
 }
 function setTab(tab: string, sound = true) {
+  if (!records[selected] || !document.querySelector(".detail-tabs")) return;
   if (sound && tab === activeTab) return;
   activeTab = tab;
   document.querySelectorAll("[data-tab]").forEach((b) => {
@@ -818,7 +878,7 @@ function renderModal() {
   if (!modal) return;
   modalTransition?.dispose();
   $("#modal-root").innerHTML =
-    `<div class="modal-backdrop"><section class="terminal-modal ${modal === "settings" ? "settings-modal" : ""}" role="dialog" aria-modal="true" aria-label="${modal === "settings" ? "系统设置" : modal === "saved" ? "收藏档案" : "档案检索"}"><div class="modal-top"><span>GUANGXUAN / ${modal === "settings" ? "SYSTEM PREFERENCES" : "ARCHIVE DIRECTORY"}</span><button data-action="close-modal" aria-label="关闭窗口">CLOSE <span>×</span></button></div>${modal === "settings" ? settingsMarkup() : `<h2>${modal === "saved" ? "已收藏" : "功能索引"}<small>${modal === "saved" ? "收藏档案" : "功能索引"}</small></h2><div class="search-field"><span>⌕</span><input id="archive-search" type="search" autocomplete="off" placeholder="搜索功能" aria-label="检索档案"/><span class="key">ESC</span></div><div class="category-filters">${categories.map((c, i) => `<button data-filter="${escapeHtml(c)}" class="${i === 0 ? "active" : ""}">${escapeHtml(c)}</button>`).join("")}</div><div class="result-header"><span>FILE / 档案</span><span>MODULE / 模块</span><span>ACCESS</span></div><div id="search-results" class="search-results"></div><div class="modal-bottom"><span id="result-count"></span><span>CREATIVE WORKSPACE <i>●</i> CONNECTED</span></div>`}</section></div>`;
+    `<div class="modal-backdrop"><section class="terminal-modal ${modal === "settings" ? "settings-modal" : ""}" role="dialog" aria-modal="true" aria-label="${modal === "settings" ? "系统设置" : modal === "saved" ? "收藏档案" : "档案检索"}"><div class="modal-top"><span>GUANGXUAN / ${modal === "settings" ? "SYSTEM PREFERENCES" : "ARCHIVE DIRECTORY"}</span><button data-action="close-modal" aria-label="关闭窗口">CLOSE <span>×</span></button></div>${modal === "settings" ? settingsMarkup() : `<h2>${modal === "saved" ? "已收藏" : "项目索引"}<small>${modal === "saved" ? "收藏档案" : "项目索引"}</small></h2><div class="search-field"><span>⌕</span><input id="archive-search" type="search" autocomplete="off" placeholder="搜索项目" aria-label="检索档案"/><span class="key">ESC</span></div><div class="category-filters">${categories.map((c, i) => `<button data-filter="${escapeHtml(c)}" class="${i === 0 ? "active" : ""}">${escapeHtml(c)}</button>`).join("")}</div><div class="result-header"><span>FILE / 档案</span><span>MODULE / 模块</span><span>ACCESS</span></div><div id="search-results" class="search-results"></div><div class="modal-bottom"><span id="result-count"></span><span>CREATIVE WORKSPACE <i>●</i> CONNECTED</span></div>`}</section></div>`;
   const backdrop = $(".modal-backdrop");
   backdrop.hidden = true;
   modalTransition = new SurfaceTransition(backdrop, $(".terminal-modal"));
@@ -912,9 +972,11 @@ document.addEventListener("input", (e) => {
 document.addEventListener("change", (e) => {
   const el = e.target as HTMLInputElement;
   if (el.id === "quality-preset" && Object.hasOwn(qualityPresets, el.value)) {
+    prefs.qualityExplicit = true;
     prefs.rendering = { ...qualityPresets[el.value as QualityPreset] };
     savePrefs();
   } else if (el.dataset.quality) {
+    prefs.qualityExplicit = true;
     const key = el.dataset.quality as keyof RenderQuality;
     prefs.rendering = normalizeQuality({
       ...prefs.rendering,
@@ -1047,7 +1109,9 @@ document.addEventListener("click", (e) => {
   if (action === "open") openFile();
   if (action === "projects") { openPortalView("archive"); return; }
   if (action === "connection") { openPortalView("settings"); return; }
-  if (action === "launch") { if (!openPortalView(records[selected].view)) notify("此模块处于规划阶段"); return; }
+  if (action === "edit-project") { void editCurrentProject(); return; }
+  if (action === "new-project") { sendPortalMessage({ type: "guangxuan:new-project" }); return; }
+  if (action === "sync-projects") { portalReady(); return; }
   if (action === "model-viewer" && mode === "detail" && scene) {
     const activeScene = scene;
     // Safari does not always focus a button when it is tapped. Capture the
@@ -1132,7 +1196,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  const typing = e.target instanceof HTMLInputElement;
+  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable;
   if (e.key === "Escape") {
     if (modal) closeModal();
     else if (mode === "detail" || (mode === "boot" && ready)) {
@@ -1293,16 +1357,22 @@ let lastTime = 0,
   frameStart = performance.now(),
   fps = 0;
 function frame(ms: number) {
+  frameHandle = null;
+  if (!renderActive || !started) return;
+  const targetFps = mode === "boot" || ms < interactionUntil ? 60 : 30;
+  $("#three-scene").dataset.targetFps = String(targetFps);
+  if (ms - lastFrameAt < 1000 / targetFps - 1) { scheduleFrame(); return; }
+  lastFrameAt = ms;
   if (!wallpaperFrame(ms)) {
-    requestAnimationFrame(frame);
+    scheduleFrame();
     return;
   }
   if (document.hidden) {
-    requestAnimationFrame(frame);
+    scheduleFrame();
     return;
   }
   workbench?.tick();
-  const time = ms / 1000;
+  const time = ms / 1000 - suspendedSeconds;
   const theme = scene?.themeAmount ?? (prefs.colorTheme === "dark" ? 1 : 0);
   paintTheme(theme);
   viewer?.setTheme(theme);
@@ -1368,14 +1438,17 @@ function frame(ms: number) {
       scene?.getStats() ?? { loaded: false, drawCalls: 0, triangles: 0 },
     );
   }
-  requestAnimationFrame(frame);
+  scheduleFrame();
 }
 function bindScene(scene: ArchiveScene, cell?: { lane: number; row: number }) {
+  scene.setTimelineOffset(suspendedSeconds);
+  scene.syncProjects(selected);
   scene.select(selected, cell ? { cell } : undefined);
   scene.onSelect = (i, cell) => {
     if (mode !== "archive" || modal || viewer?.isOpen) return;
     select(i, cell ? { cell } : undefined);
   };
+  scene.onOpen = index => { if (records[index] && mode === "archive" && !modal) openFile(); };
   scene.onNavigate = (axis, direction) => {
     if (mode !== "archive" || modal || viewer?.isOpen) return;
     if (axis === "lane") stepColumn(direction);
@@ -1383,7 +1456,7 @@ function bindScene(scene: ArchiveScene, cell?: { lane: number; row: number }) {
   };
   scene.onHover = (i) => {
     const label = $("#hover-label");
-    if (i === null) {
+    if (i === null || !records[i]) {
       label.hidden = true;
       hoverCode.finish();
       hoverTitle.finish();
@@ -1393,7 +1466,7 @@ function bindScene(scene: ArchiveScene, cell?: { lane: number; row: number }) {
     const numbersAnimated =
       motionActive("rollingNumbers") && mode === "archive";
     hoverCode.update({
-      value: Number(records[i].id.slice(2)),
+      value: i + 1,
       animated: !label.hidden && numbersAnimated,
     });
     hoverTitle.update({
@@ -1538,7 +1611,8 @@ async function start() {
     savePrefs();
     ready = true;
     portalReady();
-    select(0);
+    if (records.length) select(Math.max(0, selected));
+    else updateSelection();
     if (entry) entry.ready();
     else {
       if (isWallpaper) {
@@ -1569,7 +1643,7 @@ function completeStartup(silent: boolean) {
   audio.restartBoot();
   const fade = reviewParams.get("skipBoot") === "1" ? 0 : motionActive("boot") ? 120 : 0;
   bootStart =
-    performance.now() / 1000 -
+    timelineNow() -
     (reviewParams.has("time") ? Number(reviewParams.get("time")) : 1.76);
   if (!reviewParams.has("time")) bootStart += fade / 1000;
   setMode("boot");
@@ -1602,7 +1676,7 @@ function completeStartup(silent: boolean) {
       target.focus({ preventScroll: true });
     }
   }, fade);
-  requestAnimationFrame(frame);
+  scheduleFrame();
   // Do not compete with entry audio/font downloads. Full offline installation
   // begins after startup is complete and remains atomic.
   // Desktop embedding deliberately does not register a service worker.
@@ -1799,7 +1873,7 @@ Object.assign(window, {
             ? (frozenTime ?? performance.now() / 1000 - bootStart) + 5
             : 6.76
           : null,
-      selected: records[selected].id,
+      selected: records[selected]?.id ?? null,
       saved: [...saved],
       audio: audio.stats(),
       wallpaper: isWallpaper ? wallpaperHost() : null,
@@ -1808,4 +1882,4 @@ Object.assign(window, {
 });
 if (import.meta.hot) import.meta.hot.dispose(() => audio.dispose());
 
-window.addEventListener("pagehide", () => clearTimeout(portalOpenTimer));
+window.addEventListener("pagehide", () => { requestedVisible = false; syncRenderVisibility(); if (pendingSave) { clearTimeout(pendingSave.timer); pendingSave.reject(new Error("页面已关闭。")); pendingSave = null; } });

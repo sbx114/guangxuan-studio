@@ -8,6 +8,15 @@ function sameOriginParent() {
   catch { return false; }
 }
 
+export function fromPortalParent(event: MessageEvent) {
+  return embeddedPortal && event.source === window.parent && event.origin === location.origin && Boolean(event.data && typeof event.data === "object");
+}
+export function sendPortalMessage(message: Record<string, unknown>) {
+  if (!sameOriginParent()) return false;
+  window.parent.postMessage(message, location.origin);
+  return true;
+}
+
 export function portalReady() {
   if (sameOriginParent()) window.parent.postMessage({ type: "guangxuan:ready" }, location.origin);
 }

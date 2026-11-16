@@ -7,6 +7,7 @@ import { runAi, connectProvider, listProviderModels } from './lib/ai.mjs';
 import { getPromptCatalog } from './lib/prompts.mjs';
 import { importDocument, createDocx } from './lib/documents.mjs';
 import { createProjectStore, validateProjectId } from './lib/store.mjs';
+import { createOpenFilmManager } from './lib/openfilm.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_ROOT = path.join(ROOT, 'public');
@@ -84,6 +85,10 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+  const openFilm = await createOpenFilmManager({ dataDir, root: ROOT, store, registerOwnedAsset: (...args) => videoService.registerOwnedAsset(...args), resolveAsset: id => {
+    if (!videoService?.resolveAsset) throw new AppError(503, '媒体库尚未就绪。', 'MEDIA_LIBRARY_UNAVAILABLE');
+    return videoService.resolveAsset(id);
+  } });
   const active = new Set();
   let actualPort;
   const server = http.createServer(async (req, res) => {
@@ -100,10 +105,38 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
       try { requestUrl = new URL(req.url, `http://${req.headers.host}`); } catch { throw new AppError(400, '请求地址不正确。', 'INVALID_PATH'); }
       const pathname = requestUrl.pathname;
       const method = req.method || 'GET';
+      if (pathname === '/openfilm/editor.html' && ['GET', 'HEAD'].includes(method)) return openFilm.serveEditor(req, res, requestUrl);
+      if (pathname === '/api/openfilm/status' && method === 'GET') return json(res, 200, await openFilm.status());
+      if (pathname === '/api/openfilm/context' && method === 'GET') return json(res, 200, await openFilm.context(requestUrl.searchParams.get('projectId'), req.headers.origin || requestUrl.origin));
+      if (pathname === '/api/openfilm/exports' && method === 'GET') return json(res, 200, await openFilm.nativeExports(validateProjectId(requestUrl.searchParams.get('projectId'))));
+      const nativeDownload = pathname.match(/^\/api\/openfilm\/exports\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)\/file$/);
+      if (nativeDownload && ['GET', 'HEAD'].includes(method)) return openFilm.download(req, res, nativeDownload[1], nativeDownload[2]);
+      if (method === 'POST' && ['/api/openfilm/open', '/api/openfilm/context', '/api/openfilm/apply-plan', '/api/openfilm/append-asset', '/api/openfilm/import-asset', '/api/openfilm/export'].includes(pathname)) {
+        const body = await readJson(req);
+        const origin = req.headers.origin || requestUrl.origin;
+        if (pathname === '/api/openfilm/open') return json(res, 200, await openFilm.open(body.projectId, origin));
+        if (pathname === '/api/openfilm/context') return json(res, 200, await openFilm.context(body.projectId, origin));
+        if (pathname === '/api/openfilm/apply-plan') return json(res, 200, await openFilm.applyPlan(body.projectId, body.plan || body, origin, body.expectedRevision || body.revision));
+        if (pathname === '/api/openfilm/export') return json(res, 200, await openFilm.exportVideo(body.projectId, body.spec || {}, origin));
+        return json(res, 200, await openFilm.appendAsset(body.projectId, body.assetId, origin, body.at));
+      }
       if (videoService && await videoService.handler(req, res, requestUrl)) return;
-      if (pathname === '/api/health' && method === 'GET') return json(res, 200, { ok: true, name: 'Guangxuan Studio', version: '0.1.0', mode: 'local' });
+      if (pathname === '/api/health' && method === 'GET') return json(res, 200, { ok: true, name: 'Guangxuan Studio', version: '0.2.0', mode: 'local' });
       if (pathname === '/api/prompts' && method === 'GET') return json(res, 200, getPromptCatalog());
       if (pathname === '/api/projects' && method === 'GET') return json(res, 200, await store.list());
+      if (pathname === '/api/projects/summary' && method === 'GET') {
+        const result = await store.summary();
+        for (const project of result.projects) {
+          const native = await openFilm.summary(project.id);
+          if (!native) continue;
+          const rootTime = Date.parse(project.updatedAt);
+          const nativeTime = Date.parse(native.updatedAt);
+          const updatedAt = Number.isFinite(nativeTime) && (!Number.isFinite(rootTime) || nativeTime > rootTime) ? native.updatedAt : project.updatedAt;
+          Object.assign(project, native, { updatedAt });
+        }
+        result.projects.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+        return json(res, 200, result);
+      }
       const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
       if (projectMatch) {
         const id = validateProjectId(decodeURIComponent(projectMatch[1]));
@@ -113,6 +146,11 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
           return json(res, 200, { project });
         }
         if (method === 'PUT') return json(res, 200, { project: await store.save(id, await readJson(req)) });
+        if (method === 'PATCH') {
+          const project = await store.patchMetadata(id, await readJson(req));
+          await openFilm.syncMetadata(project).catch(() => {});
+          return json(res, 200, { project });
+        }
         if (method === 'DELETE') { const deleted = await store.remove(id); return json(res, 200, { ok: true, deleted }); }
       }
       if (method === 'POST' && ['/api/ai', '/api/connect', '/api/models', '/api/import', '/api/export/docx'].includes(pathname)) {
@@ -155,7 +193,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
         force.unref();
         server.close(error => { clearTimeout(force); error ? reject(error) : resolve(); });
         server.closeIdleConnections();
-      }).then(async () => { await store.settle(); await videoService?.close?.(); sessionSecrets.clear(); });
+      }).then(async () => { await store.settle(); await openFilm.close(); await videoService?.close?.(); sessionSecrets.clear(); });
       return closing;
     },
   };

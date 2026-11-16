@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>光宣剪辑</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2040%2040%22%3E%3Cpath%20d%3D%22M5%2011h23v24H5zM12%205h23v24%22%20fill%3D%22none%22%20stroke%3D%22%23676d55%22%20stroke-width%3D%223%22%2F%3E%3Cpath%20d%3D%22m14%2017%2010%206-10%206z%22%20fill%3D%22%23676d55%22%2F%3E%3C%2Fsvg%3E">
+<script>
+  window.openfilmHost={version:1,name:"光宣工作台"};
+  try{if(!localStorage.getItem("openfilm.language"))localStorage.setItem("openfilm.language","zh-CN");}catch(e){}
+  /* the theme before the first paint, so the wrong one never flashes: dark unless the person chose another */
+  (function () {
+    var t = 'dark';
+    try { t = localStorage.getItem('openfilm.theme') || 'dark'; } catch (e) {}
+    if (t === 'system') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';
+  })();
+</script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+/* Keep heavy editors at a stable size while their render loops are suspended. */
+#gx-home-portal,#gx-video-portal{position:fixed;inset:0;z-index:2;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .22s cubic-bezier(.2,.8,.2,1),visibility 0s linear .22s;background:#e8e5e1}
+#gx-home-portal.is-visible,#gx-video-portal.is-visible{opacity:1;visibility:visible;pointer-events:auto;transition-delay:0s}
+#gx-home-portal.is-preparing,#gx-video-portal.is-preparing{visibility:visible;opacity:0;pointer-events:none;transition:none}
+#app.gx-workspace-hidden{display:none}
+#app.gx-workspace-fade{animation:gx-workspace-in .22s cubic-bezier(.2,.8,.2,1)}
+.gx-studio-layout{height:100dvh;display:flex;flex-direction:column;background:#111214;color:#e4e4e7}
+.gx-studio-toolbar{height:48px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 18px;border-bottom:1px solid #303136;background:#17181b}
+.gx-studio-toolbar .btn{color:#dedee4;border-color:#3d3f44;border-radius:6px;min-height:30px;padding:5px 10px;font-size:12px}
+.gx-studio-toolbar .btn:hover{background:#292b30}.gx-studio-toolbar .icon{width:15px;height:15px}
+.gx-studio-project{font-size:13px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:40vw}
+.gx-studio-project small{color:#8e9199;font-size:10px;display:block;margin-top:2px}
+.gx-studio-actions{display:flex;gap:8px;align-items:center}
+.gx-native-studio{border:0;width:100%;flex:1;min-height:0;background:#111214}
+.gx-transition-status{position:fixed;z-index:80;bottom:25px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:#23271fef;color:#f4f2e9;border:1px solid #8a937b;padding:13px 19px;font-size:12px;box-shadow:0 12px 45px #0002}
+.gx-transition-status[hidden]{display:none}
+.gx-project-form-kind{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0 20px}.gx-project-kind{padding:18px;border:1px solid var(--line);display:flex;align-items:center;gap:12px;text-align:left;font-size:13px}.gx-project-kind.selected{border-color:var(--olive);background:#6268510b}
+@keyframes gx-workspace-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:800px){.gx-studio-toolbar{padding:0 10px;gap:8px}.gx-studio-project{max-width:28vw}.gx-studio-actions .btn{padding:5px 7px}}
+@media(prefers-reduced-motion:reduce){#gx-home-portal,#gx-video-portal,#app.gx-workspace-fade{transition:none;animation:none}}

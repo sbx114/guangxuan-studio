@@ -20,7 +20,7 @@ import { applyTextureQuality, resizeQuality } from "./quality-renderer";
 import { CardAppearance } from "./appearance";
 import { configureInternalOptics } from "./internal-optics";
 import { DecryptionController } from "./decryption";
-import { fileAtSlot, fileLocation } from "./data";
+import { fileAtSlot, fileLocation, records, projectCells, projectAtCell } from "./data";
 import {
   cellKey,
   sameCell,
@@ -58,6 +58,9 @@ const ease = (t: number) => {
   return t * t * t * (t * (t * 6 - 15) + 10);
 };
 export class ArchiveScene {
+  private timelineOffset = 0;
+  private now() { return performance.now() / 1000 - this.timelineOffset; }
+  setTimelineOffset(seconds: number) { this.timelineOffset = seconds; this.last = this.now(); this.clock = this.last; }
   private inputEvents = new AbortController();
   private presence = 1;
   private presenceTarget = 1;
@@ -116,8 +119,8 @@ export class ArchiveScene {
   }
   setSelectedIndexAccent(onlySelected: boolean) { this.selectedIndexOnly = onlySelected; }
   private themeAttribute?: THREE.InstancedBufferAttribute;
-  get themeAmount() { return this.theme.background(performance.now() / 1000); }
-  setTheme(dark: boolean, immediate = false) { this.theme.set(dark, performance.now() / 1000, this.selectedCell, immediate); }
+  get themeAmount() { return this.theme.background(this.now()); }
+  setTheme(dark: boolean, immediate = false) { this.theme.set(dark, this.now(), this.selectedCell, immediate); }
   private playfield = { enabled: false, bands: quietBands(), strength: 1, flatten: 0, target: null as string | null, breathing: true };
   private flatMix = 0;
   private rhythm = new RhythmMotion();
@@ -176,7 +179,7 @@ export class ArchiveScene {
   private visibility = new ArchiveVisibility();
   private drawCoverage = new ArchiveDrawCoverage();
   private shadowCoverage?: ArchiveShadowCoverage;
-  private instanceCapacity = LOOP_COLUMNS * LOOP_ROWS;
+  private instanceCapacity = 1;
   private drawnCells: ArchiveCell[] = [];
   private extraCoverage = false;
   setArchiveCoverage(extra: boolean) { this.extraCoverage = extra; }
@@ -214,7 +217,9 @@ export class ArchiveScene {
   }[] = [];
   private pulses: { row: number; lane: number; time: number }[] = [];
   private pendingPulse: ArchiveCell | null = null;
-  private selectedSlot = 76;
+  private selectedSlot = -1;
+  private selectedProjectId: string | null = null;
+  private projectTopology = "";
   private detail = 0;
   private targetDetail = 0;
   private reveal = 0;
@@ -248,6 +253,7 @@ export class ArchiveScene {
   private displayHeight = 0;
   private layoutKind = "";
   onSelect?: (index: number, cell?: ArchiveCell) => void;
+  onOpen?: (index: number) => void;
   onHover?: (index: number | null) => void;
   onNavigate?: (axis: "row" | "lane", direction: number) => void;
   constructor(
@@ -262,7 +268,7 @@ export class ArchiveScene {
       powerPreference: "high-performance",
     });
     this.renderer.setPixelRatio(
-      Math.min(devicePixelRatio, 1.5) *
+      Math.min(devicePixelRatio, this.quality.pixelRatio) *
         Math.min(innerWidth / 1920, innerHeight / 1080),
     );
     this.renderer.setSize(container.clientWidth, container.clientHeight);
@@ -276,7 +282,7 @@ export class ArchiveScene {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.domElement.setAttribute(
       "aria-label",
-      "三维研究档案阵列，点击选择，左右拖动切列，上下拖动或滚轮切换列内档案",
+      "真实项目档案，每个立方体对应一个项目。点击查看项目信息。",
     );
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.addEventListener('webglcontextrestored', () => {
@@ -349,11 +355,9 @@ export class ArchiveScene {
     gltf.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) meshes.push(o);
     });
-    const count = LOOP_COLUMNS * LOOP_ROWS;
-    for (let index = 0; index < count; index++) {
-      const cell = poolCell(index);
-      this.cells.push(cell);
-    }
+    const count = Math.max(1, records.length);
+    this.instanceCapacity = count;
+    this.cells = projectCells();
     for (const mesh of meshes) {
       const geom = mesh.geometry
         .clone()
@@ -500,8 +504,42 @@ export class ArchiveScene {
     this.appearance.apply(this.model, 0);
     this.drawLabel(0);
     this.scene.add(this.model);
-    this.model.position.copy(this.cellPosition(poolCell(this.selectedSlot)));
+    this.model.position.copy(this.cellPosition(this.selectedCell));
+    this.model.visible = records.length > 0;
     this.loaded = true;
+    this.syncProjects(records.length ? 0 : -1);
+    // Compile material variants once while the original 2D boot masks the scene.
+    const visible = this.model.visible;
+    this.model.visible = true;
+    const warmup = this.renderer.compileAsync(this.scene, this.camera);
+    this.model.visible = visible;
+    void warmup.catch(() => {});
+  }
+
+  syncProjects(index = -1) {
+    const topology = records.map(record => record.id).join("|");
+    const changed = topology !== this.projectTopology;
+    this.projectTopology = topology;
+    this.cells = projectCells();
+    if (changed) {
+      this.cancelPointer(); this.setHover(null); this.hoverLifts.clear();
+      for (const old of this.outgoing) { this.scene.remove(old.group); this.appearance.dispose(old.group); }
+      this.outgoing = []; this.pulses = []; this.drawnCells = [];
+      this.lift.value = 0; this.lift.velocity = 0;
+    }
+    if (!records.length) {
+      this.selectedProjectId = null; this.selectedSlot = -1; this.model.visible = false;
+      this.targetDetail = 0; this.decryption.leave();
+      for (const instance of this.instances) instance.count = 0;
+      this.shadowCoverage?.begin(); this.shadowCoverage?.commit();
+      this.renderState.invalidate(); return;
+    }
+    const next = records[index] ? index : Math.max(0, records.findIndex(record => record.id === this.selectedProjectId));
+    const sameProject = records[next].id === this.selectedProjectId;
+    this.model.visible = true;
+    if (!changed && sameProject) { this.drawLabel(next); this.renderState.invalidate(); return; }
+    this.select(next);
+    this.renderState.invalidate();
   }
 
   private assemblyTemplate?: Promise<THREE.Group>;
@@ -708,6 +746,7 @@ export class ArchiveScene {
     }
   }
   select(index: number, navigation?: ArchiveNavigation) {
+    if (!records[index]) return;
     if (!this.navigatingDrag) this.cancelPointer();
     this.setHover(null);
     this.lastInteraction = this.clock;
@@ -751,6 +790,7 @@ export class ArchiveScene {
       this.lift.velocity = 0;
     }
     this.selectedSlot = next;
+    this.selectedProjectId = records[index].id;
     this.selectedCell = cell;
     if (changed) {
       this.decryption.select();
@@ -787,10 +827,10 @@ export class ArchiveScene {
     c.fillRect(12, 12, 1000, 6);
     c.fillRect(12, 419, 1000, 3);
     c.font = "bold 81px MiSans";
-    c.fillText("GUANGXUAN", 22, 116);
+    c.fillText(records[index]?.title.slice(0, 12) || "GUANGXUAN", 22, 116, 735);
     c.font = "32px MiSans";
     c.fillStyle = "#878476";
-    c.fillText("CREATIVE WORKSPACE", 25, 174);
+    c.fillText(records[index]?.kind === "video" ? "VIDEO PROJECT" : records[index] ? "WRITING PROJECT" : "PROJECT ARCHIVE", 25, 174);
     c.fillStyle = "#171713";
     c.font = "bold 130px MiSans";
     c.fillText("NO." + String(index + 1).padStart(3, "0"), 22, 360);
@@ -864,6 +904,7 @@ export class ArchiveScene {
   private canBrowse() {
     return (
       this.presenceTarget === 1 &&
+      records.length > 0 &&
       this.looping &&
       !this.targetDetail &&
       this.detail < 0.2 &&
@@ -873,6 +914,7 @@ export class ArchiveScene {
     );
   }
   private setHover(cell: ArchiveCell | null) {
+    if (cell && projectAtCell(cell) < 0) cell = null;
     if (
       (!cell && !this.hoverCell) ||
       (cell && this.hoverCell && sameCell(cell, this.hoverCell))
@@ -882,6 +924,7 @@ export class ArchiveScene {
     this.onHover?.(cell ? fileAtCell(cell) : null);
   }
   private pickCell(x: number, y: number) {
+    if (!this.loaded || !records.length) return null;
     const r = this.renderer.domElement.getBoundingClientRect();
     this.cursor.set(
       ((x - r.left) / r.width) * 2 - 1,
@@ -889,18 +932,21 @@ export class ArchiveScene {
     );
     this.raycaster.setFromCamera(this.cursor, this.camera);
     const hit = this.raycaster.intersectObjects(
-      [this.instances[0], this.model, ...this.outgoing.map((o) => o.group)],
+      [this.instances[0], ...(this.model.visible ? [this.model] : []), ...this.outgoing.map((o) => o.group)],
       true,
     )[0];
     if (!hit) return null;
-    if (hit.instanceId !== undefined) return { ...this.drawnCells[hit.instanceId] };
+    if (hit.instanceId !== undefined) {
+      const cell = this.drawnCells[hit.instanceId];
+      return cell && projectAtCell(cell) >= 0 ? { ...cell } : null;
+    }
     let object: THREE.Object3D | null = hit.object;
     while (object) {
       const copy = this.outgoing.find((o) => o.group === object);
-      if (copy) return { ...copy.cell };
+      if (copy) return projectAtCell(copy.cell) >= 0 ? { ...copy.cell } : null;
       object = object.parent;
     }
-    return { ...this.selectedCell };
+    return projectAtCell(this.selectedCell) >= 0 ? { ...this.selectedCell } : null;
   }
   private trackCoordinate(axis: DragAxis, value: number) {
     return axis === "lane"
@@ -938,24 +984,27 @@ export class ArchiveScene {
       : -2.17 - (coordinate - 15.5) * ROW_SPACING;
   }
   private navigatePlane(coordinate: DragPosition) {
-    const goal = { lane: Math.round(coordinate.lane), row: Math.round(coordinate.row) };
-    if (sameCell(goal, this.selectedCell)) return;
-    const from = { ...this.selectedCell };
-    const steps = Math.min(64, Math.max(Math.abs(goal.lane - from.lane), Math.abs(goal.row - from.row)));
+    if (!this.cells.length) return;
+    let closest = this.cells[0], distance = Infinity;
+    for (const cell of this.cells) {
+      const score = (cell.lane - coordinate.lane) ** 2 + (cell.row - coordinate.row) ** 2;
+      if (score < distance) { distance = score; closest = cell; }
+    }
+    if (sameCell(closest, this.selectedCell)) return;
     this.navigatingDrag = true;
     try {
-      // Select physical cells along the travelled segment in one update per cell.
-      // Column memory is updated by onSelect, but never pulls a held plane away.
-      for (let i = 1; i <= steps; i++) {
-        const cell = {
-          lane: Math.round(from.lane + (goal.lane - from.lane) * i / steps),
-          row: Math.round(from.row + (goal.row - from.row) * i / steps),
-        };
-        if (!sameCell(cell, this.selectedCell)) this.onSelect?.(fileAtCell(cell), cell);
-      }
+      const index = projectAtCell(closest);
+      if (index >= 0) this.onSelect?.(index, closest);
     } finally {
       this.navigatingDrag = false;
     }
+  }
+  private boundTrack(value: DragPosition) {
+    if (!this.cells.length) return value;
+    return {
+      lane: THREE.MathUtils.clamp(value.lane, Math.min(...this.cells.map(cell => cell.lane)) - 0.3, Math.max(...this.cells.map(cell => cell.lane)) + 0.3),
+      row: THREE.MathUtils.clamp(value.row, Math.min(...this.cells.map(cell => cell.row)) - 0.3, Math.max(...this.cells.map(cell => cell.row)) + 0.3),
+    };
   }
   private stopMomentum() {
     if (this.archiveMomentum) {
@@ -1036,6 +1085,9 @@ export class ArchiveScene {
         lane: startTrack.lane + this.archiveDrag.value.lane * COLUMN_SPACING,
         row: startTrack.row - this.archiveDrag.value.row * ROW_SPACING,
       };
+      const bounded = this.boundTrack({ lane: this.trackCoordinate("lane", this.dragTrack.lane), row: this.trackCoordinate("row", this.dragTrack.row) });
+      this.dragTrack.lane = this.trackPosition("lane", bounded.lane);
+      this.dragTrack.row = this.trackPosition("row", bounded.row);
       this.columnCamera.value = this.dragTrack.lane;
       this.rail.value = this.dragTrack.row;
       this.columnCamera.velocity = this.rail.velocity = 0;
@@ -1115,7 +1167,7 @@ export class ArchiveScene {
         if (this.archiveDrag.active) {
           if (this.motion.dragMomentum) {
             this.archiveMomentum = {
-              time: performance.now() / 1000,
+              time: this.now(),
               motion: new ArchivePlaneMomentum(
                 { lane: this.trackCoordinate("lane", this.columnCamera.value), row: this.trackCoordinate("row", this.rail.value) },
                 this.archiveDrag.releaseVelocity(e.timeStamp, false),
@@ -1124,7 +1176,7 @@ export class ArchiveScene {
           }
         } else if (!moved) {
           const cell = this.pickCell(e.clientX, e.clientY);
-          if (cell) this.onSelect?.(fileAtCell(cell), cell);
+          if (cell) { const index = projectAtCell(cell); if (index >= 0) { this.onSelect?.(index, cell); this.onOpen?.(index); } }
         }
       }
       reset();
@@ -1235,12 +1287,14 @@ export class ArchiveScene {
       this.setHover(null);
       if (this.holdingArchive || this.archiveMomentum) this.cancelPointer();
     }
-    if (this.looping && !cinematic && !this.holdingArchive && !this.archiveMomentum) this.rebaseCoordinates();
+    // Finite projects always retain canonical cells; no periodic coordinate wrap.
     const momentum = !cinematic ? this.archiveMomentum : null;
     if (momentum) {
       momentum.motion.step(Math.min(Math.max(time - momentum.time, 0), 0.25));
       momentum.time = time;
-      this.navigatePlane(momentum.motion.value);
+      const bounded = this.boundTrack(momentum.motion.value);
+      this.navigatePlane(bounded);
+      if (bounded.lane !== momentum.motion.value.lane || bounded.row !== momentum.motion.value.row) this.stopMomentum();
       this.lastInteraction = time;
     }
     const hoverKey = !cinematic && this.hoverCell ? cellKey(this.hoverCell) : null;
@@ -1674,9 +1728,8 @@ export class ArchiveScene {
     if (activePlay && !this.reduced) fieldCache.clear();
     // Build and compact the instance set only after the actual damped camera
     // is final for this frame. Picking uses the same packed index-to-cell map.
-    const fixed = (Boolean(cinematic) || !this.looping) && !responsiveOpening;
-    this.cells = fixed ? Array.from({ length: 160 }, (_, i) => poolCell(i))
-      : this.visibility.update(this.camera, fog.far, trackX, entryZ + this.rail.value, this.extraCoverage);
+    const fixed = true;
+    this.cells = projectCells();
     const hidden = new Set(this.outgoing.map(o => cellKey(o.cell)));
     hidden.add(cellKey(this.selectedCell));
     this.drawnCells = [];
@@ -1687,7 +1740,7 @@ export class ArchiveScene {
     if (this.themeAttribute) this.themeUpdates ??= new InstanceUpdates(this.themeAttribute);
     for (const cell of this.cells) {
       const { row, lane } = cell;
-      if (hidden.has(cellKey(cell))) continue;
+      if (hidden.has(cellKey(cell)) || projectAtCell(cell) < 0 || Math.abs(cell.row - selectedRow) > 80) continue;
       const x = (lane - 2) * COLUMN_SPACING - trackX;
       const y = -4.6 + field(row, lane) + hoverLift(cell) - this.presentationDrop(cell);
       const z = (row - 15.5) * ROW_SPACING + entryZ + this.rail.value;
@@ -1722,7 +1775,7 @@ export class ArchiveScene {
     const lane = selectedLane,
       row = selectedRow;
     for (let r = row - 5; r <= row + 5; r++) {
-      if (r !== row)
+      if (r !== row && projectAtCell({ lane, row: r }) >= 0)
         neighborTop = Math.max(neighborTop, -4.6 + field(r, lane) + 3.76);
     }
     for (const o of this.outgoing) {
@@ -1730,9 +1783,10 @@ export class ArchiveScene {
         neighborTop = Math.max(neighborTop, o.group.position.y + 3.76);
       }
     }
-    this.clearance = this.model.position.y - neighborTop;
+    this.clearance = Number.isFinite(neighborTop) ? this.model.position.y - neighborTop : 10;
     this.canInspect =
       !cinematic &&
+      records.length > 0 &&
       Boolean(this.targetDetail) &&
       detail > 0.9 &&
       this.pulseGain < 0.01 &&
@@ -1851,6 +1905,13 @@ export class ArchiveScene {
       presentation: this.presence,
       triangles: this.renderer.info.render.triangles,
       archiveCount: this.drawnCells.length,
+      projectCount: records.length,
+      selectedProjectId: this.selectedProjectId,
+      visibleProjectIds: [
+        ...this.drawnCells.map(cell => records[projectAtCell(cell)]?.id),
+        ...(this.model.visible && this.selectedProjectId ? [this.selectedProjectId] : []),
+        ...this.outgoing.map(old => records[projectAtCell(old.cell)]?.id),
+      ].filter(Boolean),
       archiveCandidates: this.cells.length,
       archiveCulled: this.cells.length - this.drawnCells.length,
       archiveCapacity: this.instanceCapacity,
@@ -1865,7 +1926,7 @@ export class ArchiveScene {
       pulses: this.pulses.map((pulse) => ({ ...pulse })),
       referenceTime: Math.round((this.scanTime + 5) * 100) / 100,
       selectedSlot: this.selectedSlot,
-      selectedLane: Math.floor(this.selectedSlot / 32),
+      selectedLane: this.selectedCell.lane,
       selectedCell: { ...this.selectedCell },
       hoverCell: this.hoverCell ? { ...this.hoverCell } : null,
       hoverLifts: Object.fromEntries(this.hoverLifts),
@@ -1880,10 +1941,10 @@ export class ArchiveScene {
       dragMapping: this.archiveDrag.active ? "free" : null,
       coordinateOrigin: { ...this.coordinateOrigin },
       poolBounds: {
-        minLane: Math.min(...this.cells.map((c) => c.lane)),
-        maxLane: Math.max(...this.cells.map((c) => c.lane)),
-        minRow: Math.min(...this.cells.map((c) => c.row)),
-        maxRow: Math.max(...this.cells.map((c) => c.row)),
+        minLane: this.cells.length ? Math.min(...this.cells.map((c) => c.lane)) : 0,
+        maxLane: this.cells.length ? Math.max(...this.cells.map((c) => c.lane)) : 0,
+        minRow: this.cells.length ? Math.min(...this.cells.map((c) => c.row)) : 0,
+        maxRow: this.cells.length ? Math.max(...this.cells.map((c) => c.row)) : 0,
       },
       laneFocus: this.laneFocus.value,
       columnCamera: this.columnCamera.value,

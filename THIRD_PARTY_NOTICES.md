@@ -62,6 +62,25 @@ SOFTWARE.
 
 上游另有来自《明日方舟》PV的逐字短音，该部分不在其原创配乐的 MIT 授权范围内。本软件的业务适配已将可见品牌替换为 Guangxuan，并将键入声的播放分支替换为现有音色合成，不调用上游 PV 采样。品牌替换或移除采样并不重新授权原作品：游戏名称、标志、设定、PV、原片音频及其他第三方元素的权利仍归各自权利人所有，不能笼统视为本软件或上游作者的 MIT 内容。
 
+## OpenFilm原生编辑器与电影格式
+
+本应用在OpenFilm原始编辑器与电影格式上进行本地业务集成，使用独立的“光宣工作台”产品名称。此集成不是OpenFilm官方发行，也不表示原项目背书。
+
+- 原仓库：[openfilm/openfilm](https://github.com/openfilm/openfilm)
+- 集成版本：`packages/openfilm/package.json`中的 `0.3.2`
+- 代码许可：MIT License，Copyright (c) 2026 OpenFilm contributors
+- 保留原文件：`integrations/openfilm/LICENSE`、`integrations/openfilm/TRADEMARK.md`
+- 包内相同说明：`integrations/openfilm/packages/openfilm/LICENSE`、`TRADEMARK.md`、`THIRD_PARTY_NOTICES.md`
+- 共享代码许可：`integrations/openfilm/packages/shared/LICENSE`
+
+商标说明独立于代码MIT许可证；OpenFilm名称与标志不能因代码授权而被当作本应用自己的品牌。这里对OpenFilm的名称使用是组件与格式说明。
+
+**素材库不是统一MIT。** 实际许可文件为 `integrations/openfilm/packages/openfilm/library/LICENSE.md`：贡献者原创的模板、过渡、效果、文字、动画贴纸及所述声音资源按CC0 1.0提供；其中Microsoft Fluent Emoji另按MIT并保留Microsoft版权声明。用户导入、服务生成或额外取得的素材仍按其各自权利处理。是否包含某类资源，以实际分发目录为准。
+
+原生UI及运行依赖的说明保存在上游 `THIRD_PARTY_NOTICES.md`，包括Inter字体的SIL OFL 1.1、React/React Flow等代码的MIT、Lucide等组件的ISC，以及 `playwright-core` 的Apache License 2.0。本集成将 `playwright-core 1.61.1` 放入根应用生产依赖，使用已安装Edge或Chrome；上游文档提到的默认下载浏览器行为，不代表本集成会自动下载浏览器。
+
+打包时显式保留原生server、src、shared、library和完整Studio UI dist及其许可，不携带集成开发node_modules、用户工程、状态或密钥。版权、商标和素材文件随源码与发行包留存，不要求在创作界面增加额外署名入口。
+
 ## 其他组件
 
 Electron、Chromium、React、Remotion、FFmpeg 及其他依赖保留各自许可证。具体分发来源及位置另见 `desktop/THIRD_PARTY.md`。

@@ -48,6 +48,12 @@ $required = @(
     'resources\app\server.mjs',
     'resources\app\scripts\start-local.mjs',
     'resources\app\node_modules\@remotion\renderer\package.json',
+    'resources\app\node_modules\playwright-core\package.json',
+    'resources\app\integrations\openfilm\packages\openfilm\studio\server\server.mjs',
+    'resources\app\integrations\openfilm\packages\openfilm\studio\ui\dist\index.html',
+    'resources\app\integrations\openfilm\LICENSE',
+    'resources\app\integrations\openfilm\TRADEMARK.md',
+    'resources\app\integrations\openfilm\packages\openfilm\library\LICENSE.md',
     'resources\app\desktop\icon.png',
     'resources\app\LICENSE',
     'resources\bin\ffmpeg.exe',
@@ -61,6 +67,8 @@ foreach ($relative in $required) {
 }
 $package = Get-Content -LiteralPath (Join-Path $sourceDirectory 'resources\app\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($package.name -ne 'guangxuan-studio') { throw 'The source is not a Guangxuan Studio package.' }
+$playwright = Get-Content -LiteralPath (Join-Path $sourceDirectory 'resources\app\node_modules\playwright-core\package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($playwright.version -ne '1.61.1') { throw 'The source package requires root playwright-core 1.61.1.' }
 
 if (Test-Path -LiteralPath $installationDirectory) {
     if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) { throw 'The destination already exists and is not marked as a managed installation.' }

@@ -28,6 +28,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'public/rhine/index.html')
 if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'))) {
   throw 'The required THIRD_PARTY_NOTICES.md is missing.'
 }
+if ($package.dependencies.'playwright-core' -ne '1.61.1') { throw 'playwright-core 1.61.1 must be a root production dependency.' }
+$nativePackager = Join-Path $PSScriptRoot 'package-openfilm-runtime.mjs'
+& node $nativePackager --check
+if ($LASTEXITCODE -ne 0) { throw 'OpenFilm native runtime preflight failed. Build its Studio UI before packaging.' }
 if ((Test-Path -LiteralPath $buildOutput) -and
     (Get-ChildItem -LiteralPath $buildOutput -Force | Select-Object -First 1) -and
     -not (Test-Path -LiteralPath (Join-Path $buildOutput '.guangxuan-build.json'))) {
@@ -79,6 +83,10 @@ foreach ($required in @('package.json','server.mjs','LICENSE','lib','public','de
   if (-not (Test-Path -LiteralPath $source)) { throw "Missing required application path: $required" }
   Copy-Item -LiteralPath $source -Destination $appDestination -Recurse -Force
 }
+$lockFile = Join-Path $repoRoot 'package-lock.json'
+if (Test-Path -LiteralPath $lockFile) { Copy-Item -LiteralPath $lockFile -Destination $appDestination -Force }
+& node $nativePackager --destination $appDestination
+if ($LASTEXITCODE -ne 0) { throw 'OpenFilm native runtime packaging failed.' }
 foreach ($launcher in @('启动光宣工作台.cmd','停止本地服务.cmd','重启光宣工作台.cmd')) {
   $launcherSource = Join-Path $repoRoot $launcher
   if (Test-Path -LiteralPath $launcherSource) { Copy-Item -LiteralPath $launcherSource -Destination $buildOutput -Force }
@@ -101,6 +109,10 @@ if (-not $SkipDependencies) {
 if (-not (Test-Path -LiteralPath (Join-Path $appDestination 'node_modules/@remotion/renderer'))) {
   throw 'The packaged Remotion renderer is missing.'
 }
+$playwrightPackage = Join-Path $appDestination 'node_modules/playwright-core/package.json'
+if (-not (Test-Path -LiteralPath $playwrightPackage)) { throw 'The packaged root playwright-core dependency is missing.' }
+$playwright = Get-Content -LiteralPath $playwrightPackage -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($playwright.version -ne '1.61.1') { throw 'The packaged playwright-core version must be 1.61.1.' }
 if (-not $FFmpegDirectory) {
   $FFmpegDirectory = & (Join-Path $PSScriptRoot 'get-ffmpeg.ps1') -CacheDirectory $buildCache
 }
@@ -139,16 +151,20 @@ $launchNote = @'
    兼容桌面入口：双击“启动光宣工作台.cmd”，使用已安装的 Node.js 24+ 与 Edge 标准应用窗口。
    兼容入口不执行 Electron，也不修改 Windows 安全策略。
 3. 在应用的“模型连接”中填写中转站地址、模型名称和 API 密钥。
-4. Remotion 动画渲染使用本机的 Microsoft Edge 或 Google Chrome。
+4. 视频项目使用集成的原生剪辑编辑器；Remotion与原生导出使用本机的 Microsoft Edge 或 Google Chrome。
 
+项目方块对应真实记录。点击方块查看详情，可修改名称与简介；确认编辑后进入对应工作区。
 项目保存在当前 Windows 账户的应用数据目录。
 兼容入口的数据在 %LOCALAPPDATA%/GuangxuanStudio；“停止本地服务.cmd”可关闭其后台服务。
+原生视频工程在 openfilm/projects/<项目ID>/，状态在 openfilm/state/；旧JSON资料继续保留。
+视频备份应保存完整原生工程目录和关联资料，不能仅用旧JSON代替最新剪辑。
 查看、编辑和导出已有项目不需要联网，AI 生成会连接你配置的服务。
-选择“记住密钥”时使用 Windows 系统加密，仅当前账户可解密。
+Electron版选择“记住密钥”时使用 Windows 系统加密，仅当前账户可解密；兼容入口使用会话密钥。
 
 此为未经代码签名的开源便携版。发布源码随附 MIT 许可证。
 Electron 及 Chromium 的许可证保留在本目录的 LICENSE 和 LICENSES.chromium.html 中。
-Remotion 与 FFmpeg 使用各自的许可证，详见 resources/app/desktop/THIRD_PARTY.md。
+OpenFilm代码、商标及素材库的许可分别保留；素材库不能统称MIT。
+Remotion、FFmpeg及其它组件使用各自的许可证，详见 resources/app/THIRD_PARTY_NOTICES.md。
 '@
 $launchNote | Set-Content -LiteralPath (Join-Path $buildOutput '使用说明.txt') -Encoding UTF8
 if ($CreateZip) {

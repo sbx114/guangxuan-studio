@@ -21,15 +21,41 @@ pnpm run build
 { type: "guangxuan:ready" }
 ```
 
-用户打开功能档案时，原版档案抽取和镜头推进先运行约 900 毫秒，然后发送：
+项目列表由父页发送，子页只保留ID、名称、类型、简介、时间与统计等元数据：
+
+```js
+{ type: "guangxuan:projects", projects: [projectSummary], selectedId }
+```
+
+每个真实ID只有一个有限网格位置，没有无限重复档案。空列表不会生成占位项目。单击立方体打开原版抽取/详情动画，可修改名称和简介；只有明确点击“进入编辑”才发送：
+
+```js
+{ type: "guangxuan:edit-project", projectId }
+```
+
+保存信息使用请求回执，不会将本地输入误报为已保存：
+
+```js
+{ type: "guangxuan:update-project", projectId, title, description, requestId }
+// parent response
+{ type: "guangxuan:project-updated", requestId, project, error }
+```
+
+顶栏项目和模型入口仍支持：
 
 ```js
 { type: "guangxuan:open", view: "video" | "writer" | "archive" | "settings" }
 ```
 
-消息仅发送给同源父页面。此入口不读取 API 密钥，也不发起模型请求。科普工作室是只读规划说明，不发送进入消息。
+消息仅发送给同源父页面，接收时同时核验父窗口身份和origin。此入口不读取API密钥或项目正文，不发起模型请求。新建按钮发送 `guangxuan:new-project`，由父页创建真实项目。
 
-初次打开保留原启动轨迹，时间压缩为资源就绪后约 5.3 秒，可随时跳过。返回首页使用 `?embed=1&skipBoot=1`；右下角可重播。减少运动偏好和界面音量设置仍可使用，默认音效、音乐均关闭。
+父页可用 `guangxuan:select-project` 定位存在的ID，并以 `detail:true` 打开详情；不存在的ID会被忽略。`guangxuan:editor-status` 用于显示编辑器的准备状态或错误。
+
+主页iframe保持挂载，父页用 `guangxuan:visibility` 暂停或恢复显示。隐藏时停止主RAF并暂停声音；恢复时修正逻辑时间，保留renderer、模型与材质。默认均衡预设保留玻璃效果，使用AO16、半分辨率遮蔽和DPR上限1；空闲30fps，交互60fps。显式选择的高画质保留。
+
+初次打开保留原启动轨迹，时间压缩为资源就绪后约5.3秒，可随时跳过。正常返回首页继续使用已挂载iframe；需要重新创建且跳过启动时可传 `?embed=1&skipBoot=1`。右下角可重播。减少运动偏好和界面音量设置仍可使用，默认音效、音乐均关闭。
+
+`pnpm run check:projects` 检查空状态、一一映射、无循环别名、排序稳定、元数据过滤和画质默认值。`#three-scene.dataset.renderStats` 包含 `projectCount`、`selectedProjectId`、`visibleProjectIds`，可核对渲染实例；`fps`、`targetFps` 和 `renderPaused` 可用于性能检查。
 
 ## 素材与许可
 

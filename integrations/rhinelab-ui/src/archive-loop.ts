@@ -1,4 +1,4 @@
-import { archiveColumns, columnFiles, fileLocation } from "./data.ts";
+import { archiveColumns, columnFiles, fileLocation, projectAtCell } from "./data.ts";
 
 export type ArchiveCell = { lane: number; row: number };
 export type ArchiveNavigation =
@@ -25,8 +25,7 @@ export function nearestOccurrence(
 }
 
 export function fileAtCell({ lane, row }: ArchiveCell) {
-  const files = columnFiles(wrap(lane, archiveColumns.length));
-  return files[wrap(row - 12, files.length)];
+  return projectAtCell({ lane, row });
 }
 
 export function selectionCell(
@@ -34,23 +33,9 @@ export function selectionCell(
   current: ArchiveCell,
   navigation?: ArchiveNavigation,
 ): ArchiveCell {
-  if (navigation && "cell" in navigation) return { ...navigation.cell };
+  if (navigation && "cell" in navigation && projectAtCell(navigation.cell) === index) return { ...navigation.cell };
   const next = fileLocation(index);
-  const row = nearestOccurrence(
-    next.row,
-    current.row,
-    columnFiles(next.lane).length,
-  );
-  if (navigation?.axis === "row") {
-    return { lane: current.lane, row: current.row + navigation.direction };
-  }
-  return {
-    lane:
-      navigation?.axis === "lane"
-        ? current.lane + navigation.direction
-        : nearestOccurrence(next.lane, current.lane, archiveColumns.length),
-    row,
-  };
+  return { lane: next.lane, row: next.row };
 }
 
 // Preserve the reference animation's original first 160 instances. The four

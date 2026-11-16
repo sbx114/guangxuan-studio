@@ -91,7 +91,7 @@ async function runManagedServer() {
     }
     if (req.url === '/api/desktop/status' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-      res.end(JSON.stringify({ app: 'GuangxuanStudioDesktopLauncher', instanceId, version: '0.1.0' }));
+      res.end(JSON.stringify({ app: 'GuangxuanStudioDesktopLauncher', instanceId, version: '0.2.0' }));
       return;
     }
     if (req.url === '/api/desktop/shutdown' && req.method === 'POST') {
