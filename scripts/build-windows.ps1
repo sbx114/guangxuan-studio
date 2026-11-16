@@ -79,7 +79,7 @@ foreach ($required in @('package.json','server.mjs','LICENSE','lib','public','de
   if (-not (Test-Path -LiteralPath $source)) { throw "Missing required application path: $required" }
   Copy-Item -LiteralPath $source -Destination $appDestination -Recurse -Force
 }
-foreach ($launcher in @('启动光宣工作台.cmd','停止本地服务.cmd')) {
+foreach ($launcher in @('启动光宣工作台.cmd','停止本地服务.cmd','重启光宣工作台.cmd')) {
   $launcherSource = Join-Path $repoRoot $launcher
   if (Test-Path -LiteralPath $launcherSource) { Copy-Item -LiteralPath $launcherSource -Destination $buildOutput -Force }
 }

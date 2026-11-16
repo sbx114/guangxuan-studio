@@ -113,7 +113,8 @@ function Copy-ApplicationTree([string]$RelativePath) {
 Copy-ApplicationTree 'resources\app'
 Copy-ApplicationTree 'resources\bin'
 Copy-ApplicationTree 'resources\third-party'
-foreach ($name in @('启动光宣工作台.cmd', '停止本地服务.cmd')) {
+foreach ($name in @('启动光宣工作台.cmd', '停止本地服务.cmd', '重启光宣工作台.cmd')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $sourceDirectory $name))) { continue }
     $destination = Join-Path $installationDirectory $name
     Assert-InstallationChild $destination
     Copy-Item -LiteralPath (Join-Path $sourceDirectory $name) -Destination $destination -Force
