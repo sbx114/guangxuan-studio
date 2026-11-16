@@ -41,11 +41,42 @@ const paths = {
 };
 export function icon(name,cls='') { return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.file}"/></svg>`; }
 export function toast(text,type='info') { const el=document.createElement('div'); el.className=`toast ${type}`; el.innerHTML=`${icon(type==='error'?'info':'check')}<span>${escapeHtml(text)}</span>`; document.querySelector('#toast-region').append(el); setTimeout(()=>el.remove(),6500); }
+function localConnectionError(code='LOCAL_SERVICE_UNAVAILABLE') {
+ const address=globalThis.location?.host || '当前窗口';
+ const message=globalThis.location?.protocol==='file:'
+  ? '请通过“启动光宣工作台.cmd”打开应用，直接打开网页文件无法连接本地工作服务。'
+  : `应用没有收到本地工作服务的响应（${address}）。请重新双击“启动光宣工作台.cmd”，在新打开的窗口中重试。`;
+ const error=new Error(message);error.code=code;return error;
+}
+export async function fetchLocal(path,options={}) {
+ try { return await fetch(path,options); }
+ catch(error) {
+  if(error?.name==='AbortError'||options.signal?.aborted&&options.signal.reason?.name==='AbortError')throw error;
+  throw localConnectionError(error?.name==='TimeoutError'?'LOCAL_SERVICE_TIMEOUT':'LOCAL_SERVICE_UNAVAILABLE');
+ }
+}
 export async function api(path,body,options={}) {
- const response=await fetch(path,{...options,method:options.method||(body!==undefined?'POST':'GET'),headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}),...options.headers},...(body!==undefined?{body:JSON.stringify(body)}:{})});
- const data=await response.json().catch(()=>({}));
- if(!response.ok) throw new Error(typeof data.error==='string'?data.error:data.error?.message||data.message||`请求失败（${response.status}）`);
+ const response=await fetchLocal(path,{...options,method:options.method||(body!==undefined?'POST':'GET'),headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}),...options.headers},...(body!==undefined?{body:JSON.stringify(body)}:{})});
+ let data;
+ try { data=await response.json(); }
+ catch(error) {
+  if(error?.name==='AbortError')throw error;
+  const invalid=new Error(`本地工作服务返回了无法读取的响应（HTTP ${response.status}）。请重新打开应用后重试。`);
+  invalid.code='LOCAL_SERVICE_INVALID_RESPONSE';throw invalid;
+ }
+ if(!response.ok) {
+  const error=new Error(typeof data?.error==='string'?data.error:data?.error?.message||data?.message||`请求失败（${response.status}）`);
+  error.code=data?.code||'REQUEST_FAILED';throw error;
+ }
  return data;
+}
+export async function checkLocalService() {
+ const result=await api('/api/health',undefined,{signal:AbortSignal.timeout(3500)});
+ if(result?.ok!==true||result?.name!=='Guangxuan Studio') {
+  const error=new Error('当前地址没有连接到光宣工作台服务，请使用桌面启动入口重新打开。');
+  error.code='LOCAL_SERVICE_MISMATCH';throw error;
+ }
+ return result;
 }
 export function showModal({title,kicker='GUANGXUAN / STUDIO',body,wide=false,onMount,onClose}) {
  const root=document.querySelector('#modal-root');

@@ -1,4 +1,4 @@
-import { api, toast, showModal, icon, escapeHtml, uid, clone, timecode, saveFile, safeName } from './ui.js';
+import { api, fetchLocal, toast, showModal, icon, escapeHtml, uid, clone, timecode, saveFile, safeName } from './ui.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const seconds = value => Math.round((Number(value) || 0) * 1000) / 1000;
@@ -243,7 +243,7 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
     let count = 0;
     try {
       for (const file of files) {
-        const response = await fetch('/api/video/upload', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) }, body: file });
+        const response = await fetchLocal('/api/video/upload', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) }, body: file });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || `素材上传失败（${response.status}）。`);
         for (const asset of result.assets || []) { const old = assets.findIndex(item => item.id === asset.id); if (old >= 0) assets[old] = asset; else assets.push(asset); count++; }

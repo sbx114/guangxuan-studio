@@ -69,7 +69,15 @@ async function startService() {
   });
 }
 
-try {
+export async function resolveLaunchService(healthyService, startNewService = startService) {
+  // A healthy instance owns the shared workspace, regardless of which copy of
+  // the launcher opened it. Upgrades use the explicit stop command instead.
+  if (healthyService) return healthyService;
+  return startNewService();
+}
+
+async function runLauncher() {
+ try {
   if (process.platform !== 'win32') throw new Error('此启动入口用于 Windows；其他系统请使用 node server.mjs。');
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('需要 Node.js 24 或更新版本。');
   let state = await existingService();
@@ -82,12 +90,7 @@ try {
     console.log(state ? '光宣工作台本地服务已停止。' : '光宣工作台本地服务当前未运行。');
   } else {
     const edge = await installedEdge();
-    if (state && path.resolve(state.appRoot) !== path.resolve(ROOT)) {
-      await stopService(state);
-      await new Promise(resolve => setTimeout(resolve, 350));
-      state = null;
-    }
-    state ||= await startService();
+    state = await resolveLaunchService(state);
     const url = new URL(state.url);
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !['4317', '4417'].includes(url.port)) throw new Error('本地服务地址不正确。');
     const edgeWindow = spawn(edge, [
@@ -101,4 +104,11 @@ try {
 } catch (error) {
   console.error(`启动失败：${String(error.message || error)}`);
   process.exitCode = 1;
+}
+}
+
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const thisPath = fileURLToPath(import.meta.url);
+if (invokedPath && (process.platform === 'win32' ? invokedPath.toLowerCase() === thisPath.toLowerCase() : invokedPath === thisPath)) {
+  await runLauncher();
 }

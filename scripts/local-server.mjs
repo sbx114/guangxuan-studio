@@ -30,7 +30,42 @@ function tokenMatches(candidate) {
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
-try {
+export async function readPortPreference(file) {
+  let text;
+  try { text = await fs.readFile(file, 'utf8'); }
+  catch (error) {
+    if (error.code === 'ENOENT') return undefined;
+    throw new Error('无法读取工作台端口配置，请检查应用数据目录的访问权限。', { cause: error });
+  }
+  let preference;
+  try { preference = JSON.parse(text); }
+  catch (error) { throw new Error('工作台端口配置损坏，启动已停止以避免改变原地址。', { cause: error }); }
+  if (!preference || ![4317, 4417].includes(preference.port))
+    throw new Error('工作台端口配置无效，启动已停止以避免改变原地址。');
+  return preference;
+}
+
+export async function listenWithPortPreference(preference, startAtPort) {
+  const fixed = preference !== undefined;
+  if (fixed && (!preference || ![4317, 4417].includes(preference.port)))
+    throw new Error('工作台端口配置无效。');
+  const candidates = fixed ? [preference.port] : [4417, 4317];
+  for (const port of candidates) {
+    try { return await startAtPort(port); }
+    catch (error) {
+      if (error.code !== 'EADDRINUSE') throw error;
+      if (fixed) {
+        const conflict = new Error(`工作台固定端口 ${port} 被占用，启动已停止以保持原地址。请检查已打开的工作台，或关闭占用程序后重试。`, { cause: error });
+        conflict.code = 'FIXED_PORT_IN_USE';
+        throw conflict;
+      }
+    }
+  }
+  throw new Error('首次启动需要使用 4417 或 4317 端口，两者当前均被占用，请关闭占用程序后重试。');
+}
+
+async function runManagedServer() {
+ try {
   await fs.mkdir(dataDir, { recursive: true });
   if (!process.env.GUANGXUAN_BIN_DIR) {
     const candidates = [
@@ -43,16 +78,8 @@ try {
       catch { /* A developer may also provide executables through PATH. */ }
     }
   }
-  let previousPort = 4417;
-  try {
-    const preferences = JSON.parse(await fs.readFile(preferencesFile, 'utf8'));
-    if ([4317, 4417].includes(preferences.port)) previousPort = preferences.port;
-  } catch { /* The first launch uses the dedicated application port. */ }
-  for (const port of [previousPort, ...[4417, 4317].filter(value => value !== previousPort)]) {
-    try { localServer = await startServer({ port, host: '127.0.0.1', dataDir }); break; }
-    catch (error) { if (error.code !== 'EADDRINUSE') throw error; }
-  }
-  if (!localServer) throw new Error('4317 和 4417 端口均被占用，请关闭占用程序后重试。');
+  const preference = await readPortPreference(preferencesFile);
+  localServer = await listenWithPortPreference(preference, port => startServer({ port, host: '127.0.0.1', dataDir }));
   const normalHandlers = localServer.server.listeners('request');
   localServer.server.removeAllListeners('request');
   localServer.server.on('request', (req, res) => {
@@ -87,6 +114,12 @@ try {
   await localServer?.close().catch(() => {});
   process.exit(1);
 }
+}
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const thisPath = fileURLToPath(import.meta.url);
+if (invokedPath && (process.platform === 'win32' ? invokedPath.toLowerCase() === thisPath.toLowerCase() : invokedPath === thisPath)) {
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  await runManagedServer();
+}
