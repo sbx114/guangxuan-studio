@@ -1,16 +1,19 @@
 import React from 'react';
-import { interpolate, useCurrentFrame } from 'remotion';
-import { Reveal, SceneShell, clamp, fittedSize, smooth, useSceneStyle } from './shared.jsx';
+import { MaskReveal, OpticalArchive, Reveal, SceneShell, fittedSize, useSceneStyle } from './shared.jsx';
 
 export function OutroScene(props) {
-  const { scene } = props;
+  const { scene, index } = props;
   const { width, scale, portrait, palette } = useSceneStyle(props.theme);
-  const frame = useCurrentFrame();
+  const contentWidth = width - (portrait ? 104 : 144) * scale;
+  const textWidth = portrait ? contentWidth : contentWidth * 0.6;
   return <SceneShell {...props}>
-    <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: 20 * scale }}>
-      <div style={{ width: 72 * scale, height: 72 * scale, borderRadius: '50%', border: `${2 * scale}px solid ${palette.accent}`, marginBottom: 40 * scale, scale: interpolate(frame, [0, 35], [0.7, 1], { ...clamp, easing: smooth }), opacity: interpolate(frame, [0, 20], [0, 1], clamp) }} />
-      <Reveal delay={8} style={{ fontSize: fittedSize(scene.title, (portrait ? 70 : 86) * scale, width - (portrait ? 104 : 144) * scale, 3, 34 * scale), fontWeight: 700, lineHeight: 1.25, overflowWrap: 'anywhere' }}>{scene.title}</Reveal>
-      {scene.subtitle && <Reveal delay={22} style={{ marginTop: 30 * scale, fontSize: 28 * scale, lineHeight: 1.6, color: palette.muted, maxWidth: '90%' }}>{scene.subtitle}</Reveal>}
+    <div style={{ display: 'grid', gridTemplateColumns: portrait ? '1fr' : '0.7fr 1.3fr', gap: 34 * scale, alignItems: 'center' }}>
+      <div style={{ height: (portrait ? 320 : 366) * scale, width: portrait ? 292 * scale : '100%', justifySelf: 'center' }}><OpticalArchive theme={props.theme} index={index} mode="seal" /></div>
+      <div>
+        <Reveal delay={3} style={{ display: 'flex', gap: 12 * scale, alignItems: 'center', marginBottom: 26 * scale }}><i style={{ width: 6 * scale, height: 6 * scale, backgroundColor: palette.brass }} /><span style={{ display: 'block', width: 88 * scale, height: 1, backgroundColor: palette.line }} /></Reveal>
+        <MaskReveal delay={8} duration={28} color={palette.ink} style={{ fontSize: fittedSize(scene.title, (portrait ? 65 : 78) * scale, textWidth, 3, 32 * scale), fontWeight: 650, lineHeight: 1.28, letterSpacing: -1.2 * scale, overflowWrap: 'anywhere' }}>{scene.title}</MaskReveal>
+        {scene.subtitle && <Reveal delay={26} distance={13 * scale} style={{ marginTop: 30 * scale, fontSize: fittedSize(scene.subtitle, 26 * scale, textWidth, 3, 18 * scale), lineHeight: 1.7, color: palette.muted }}>{scene.subtitle}</Reveal>}
+      </div>
     </div>
   </SceneShell>;
 }

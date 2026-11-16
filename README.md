@@ -25,6 +25,12 @@ AI粗剪依据素材名称、类型、时长、尺寸及脚本文字，不进行
 
 兼容窗口使用Edge；Electron版动画渲染可使用本机Edge或Chrome。发行目录包含FFmpeg与FFprobe。兼容启动的本地数据存放在 `%LOCALAPPDATA%\GuangxuanStudio`。
 
+### 安装到桌面
+
+兼容版可安装到 `%LOCALAPPDATA%\Programs\GuangxuanStudio`，并创建桌面的“光宣工作台”快捷方式。应用程序与项目数据分开存放；安装时不复制密钥、浏览器配置或用户媒体。
+
+完整解压程序包后，可运行 `scripts/install-desktop.ps1 -SourceRoot '完整程序包目录'`。安装器只使用现有Node与Edge，不修改系统策略；安装结束后回读验证快捷方式，并执行不打开窗口的依赖检查。
+
 ### 从源码运行
 
 需要 **Node.js 24或更高版本**。在项目根目录运行：
@@ -100,6 +106,6 @@ node --test tests/video.test.mjs
 
 ## 设计与开源
 
-初始界面采用暖灰配色和档案式排版，设计方向参考用户指定的 [RhineLabUI](https://github.com/LBEILC/RhineLabUI)。本项目未复制其游戏或3D素材。
+初始界面采用暖灰配色、玻璃档案阵列、悬停抽取和短暂展开动效，设计方向参考用户指定的 [RhineLabUI](https://github.com/LBEILC/RhineLabUI)。纸色Remotion模板也沿用细线、透明档案层和文字遮挡揭示。界面尊重“减少运动”偏好。本项目未复制其游戏或3D素材。
 
 应用源码采用 [MIT许可证](LICENSE)。Remotion、FFmpeg等依赖及外部照片、标识、网页材料遵循各自许可证和使用条件。发布仓库时只分享源码与公开示例，真实项目、连接配置、密钥和私人媒体保留在本机。
