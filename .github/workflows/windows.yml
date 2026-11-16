@@ -1,0 +1,36 @@
+name: Windows portable build
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install render dependencies
+        shell: pwsh
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Prepare FFmpeg
+        shell: pwsh
+        run: |
+          $ffmpegDirectory = ./scripts/get-ffmpeg.ps1
+          "GUANGXUAN_BIN_DIR=$ffmpegDirectory/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Run backend tests
+        shell: pwsh
+        run: node --test tests/*.test.mjs
+      - name: Build portable desktop application
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -CreateZip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Guangxuan-Studio-Windows-x64
+          path: dist/Guangxuan-Studio-win32-x64.zip
+          if-no-files-found: error

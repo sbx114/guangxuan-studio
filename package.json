@@ -1,0 +1,35 @@
+{
+  "name": "guangxuan-studio",
+  "productName": "光宣工作台",
+  "version": "0.1.0",
+  "description": "面向学院宣传的一站式 AI 内容生产与审核桌面应用",
+  "type": "module",
+  "main": "desktop/main.cjs",
+  "license": "MIT",
+  "author": "Guangxuan Studio contributors",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "electron .",
+    "desktop": "electron .",
+    "desktop:local": "node scripts/start-local.mjs",
+    "stop:local": "node scripts/start-local.mjs --stop",
+    "web": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "build:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1"
+  },
+  "config": {
+    "electronRuntimeVersion": "45.3.3"
+  },
+  "devDependencies": {
+    "electron": "45.3.2"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.543",
+    "@remotion/renderer": "4.0.543",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "remotion": "4.0.543"
+  }
+}
