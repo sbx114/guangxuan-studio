@@ -22,6 +22,12 @@ if ($buildOutput -eq $repoRoot -or $buildOutput -eq [System.IO.Path]::GetPathRoo
 foreach ($required in @('package.json','server.mjs','LICENSE','lib','public','desktop','animation','scripts')) {
   if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $required))) { throw "Missing required application path: $required" }
 }
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'public/rhine/index.html'))) {
+  throw 'The Rhine home has not been built. Run npm run build:home (or pnpm run build:home) first.'
+}
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md'))) {
+  throw 'The required THIRD_PARTY_NOTICES.md is missing.'
+}
 if ((Test-Path -LiteralPath $buildOutput) -and
     (Get-ChildItem -LiteralPath $buildOutput -Force | Select-Object -First 1) -and
     -not (Test-Path -LiteralPath (Join-Path $buildOutput '.guangxuan-build.json'))) {
@@ -117,7 +123,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ffmpeg-manifest.json') -Destina
 $ffmpegInfo = Start-Process -FilePath (Join-Path $ffmpegBin 'ffmpeg.exe') -ArgumentList '-buildconf' -WindowStyle Hidden -Wait -PassThru `
   -RedirectStandardError (Join-Path $ffmpegNotices 'build-configuration.txt') -RedirectStandardOutput (Join-Path $ffmpegNotices 'build-output.txt')
 if ($ffmpegInfo.ExitCode -ne 0) { throw 'Unable to inspect the bundled FFmpeg build.' }
-foreach ($optional in @('README.md','PRIVACY.md','docs','tests')) {
+foreach ($optional in @('README.md','PRIVACY.md','THIRD_PARTY_NOTICES.md','docs','tests')) {
   $source = Join-Path $repoRoot $optional
   if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $appDestination -Recurse -Force }
 }

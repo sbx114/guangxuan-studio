@@ -1,0 +1,29 @@
+/* Integration-only copy and controls. Original scene, layout and motion remain. */
+.powered{display:none!important}
+.brand h1{font-size:43px;letter-spacing:0;font-weight:750}
+.brand>div{font-size:19px;letter-spacing:4px;line-height:25px}
+.brand p{font-size:33px}
+.brand-analysis{width:189px}
+.brand p b{font-size:30px}
+.welcome-company{font-size:80px}
+.system-nav{gap:35px}
+.system-nav button{font-size:14px}
+.system-nav [data-action="projects"] span[hidden]{display:none}
+.system-footer>span:first-child{letter-spacing:1px}
+.system-footer>span:nth-child(2){justify-content:flex-end}
+.file-summary{font-size:19px}
+.file-summary>span:last-child{font-size:12px}
+.read-file{font-family:MiSans,sans-serif;letter-spacing:2px}
+.archive-hint{font-size:11px}
+.settings-intro:empty,.detail-footnote,.detail-actions [data-action="bookmark"]{display:none}
+.detail-actions{gap:18px}
+.portal-launch[disabled]{opacity:.5;cursor:default}
+.object-caption .viewer-open{font-size:12px}
+.settings-modal .modal-bottom{min-height:18px}
+#stage[data-mode="boot"] #skip{display:block!important;visibility:visible!important;opacity:1!important;z-index:90;pointer-events:auto;right:60px;top:50px;bottom:auto;background:#eeeae0cc;border:1px solid #b7b6a7;padding:13px 18px;font-size:16px}
+#stage[data-mode="boot"] .brand{pointer-events:none}
+[data-layout="compact"] .system-nav,[data-layout="portrait"] .system-nav{gap:13px}
+[data-layout="compact"] .system-nav button,[data-layout="portrait"] .system-nav button{font-size:12px;min-width:36px;min-height:40px}
+[data-layout="portrait"] .system-nav [data-action="search"]{font-size:12px}
+[data-layout="portrait"] .brand>div{letter-spacing:2px}
+@media(prefers-reduced-motion:reduce){#stage .portal-launch{transition:none}}

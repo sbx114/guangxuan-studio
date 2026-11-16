@@ -17,6 +17,7 @@
     "stop:local": "node scripts/start-local.mjs --stop",
     "web": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
+    "build:home": "node scripts/build-rhine-home.mjs",
     "build:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1"
   },
   "config": {

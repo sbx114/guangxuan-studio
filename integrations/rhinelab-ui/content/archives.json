@@ -1,0 +1,111 @@
+{
+  "categories": [
+    "视频剪辑",
+    "文案写作",
+    "科普工作室",
+    "项目档案",
+    "模型连接"
+  ],
+  "columns": [
+    "视频剪辑",
+    "文案写作",
+    "科普工作室",
+    "项目档案",
+    "模型连接"
+  ],
+  "records": [
+    {
+      "source": "",
+      "abstract": "导入素材，编排时间线，使用 AI 粗剪与 Remotion 动画，导出视频。",
+      "view": "video",
+      "status": "available",
+      "department": "创作工具",
+      "clearance": "可用",
+      "en": "VIDEO STUDIO",
+      "title": "视频剪辑",
+      "date": "本地工作区",
+      "findings": [
+        "AI 粗剪建议",
+        "Remotion 动画画面",
+        "字幕、配乐与成片导出"
+      ],
+      "category": "视频剪辑",
+      "id": "X-001",
+      "lead": "光宣工作台"
+    },
+    {
+      "source": "",
+      "abstract": "核对素材，生成并编辑宣传文案，继续制作视频分镜。",
+      "view": "writer",
+      "status": "available",
+      "department": "创作工具",
+      "clearance": "可用",
+      "en": "WRITING DESK",
+      "title": "文案写作",
+      "date": "本地工作区",
+      "findings": [
+        "素材与事实核对",
+        "宣传文案与视频分镜",
+        "编辑、导出与修改记录"
+      ],
+      "category": "文案写作",
+      "id": "X-002",
+      "lead": "光宣工作台"
+    },
+    {
+      "id": "X-003",
+      "en": "SCIENCE LAB",
+      "findings": [
+        "当前为只读模块说明",
+        "专业知识的可视化表达将在后续版本加入"
+      ],
+      "source": "",
+      "date": "后续版本",
+      "clearance": "规划中",
+      "abstract": "科普工作室处于规划阶段，当前可在文案与视频工作区制作内容。",
+      "status": "planned",
+      "lead": "光宣工作台",
+      "department": "规划模块",
+      "title": "科普工作室",
+      "category": "科普工作室"
+    },
+    {
+      "source": "",
+      "abstract": "打开已有项目，导入或导出项目备份。",
+      "view": "archive",
+      "status": "available",
+      "department": "本地项目",
+      "clearance": "可用",
+      "en": "PROJECT ARCHIVE",
+      "title": "项目档案",
+      "date": "本地工作区",
+      "findings": [
+        "本地项目列表",
+        "继续编辑",
+        "项目备份"
+      ],
+      "category": "项目档案",
+      "id": "X-004",
+      "lead": "光宣工作台"
+    },
+    {
+      "source": "",
+      "abstract": "配置中转站接口、密钥与模型，测试 AI 连接。",
+      "view": "settings",
+      "status": "available",
+      "department": "应用设置",
+      "clearance": "可用",
+      "en": "MODEL CONNECTION",
+      "title": "模型连接",
+      "date": "本地配置",
+      "findings": [
+        "接口地址与模型设置",
+        "获取模型列表",
+        "连接测试"
+      ],
+      "category": "模型连接",
+      "id": "X-005",
+      "lead": "光宣工作台"
+    }
+  ]
+}

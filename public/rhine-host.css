@@ -1,0 +1,9 @@
+.rhine-home{position:relative;width:100%;height:100dvh;min-height:480px;overflow:hidden;background:#e8e5e1}
+.rhine-home-frame{position:absolute;inset:0;display:block;width:100%;height:100%;border:0;background:#e8e5e1;z-index:1}
+.rhine-home-wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:14px;color:#626659;font-size:12px;pointer-events:none}
+.rhine-home-wait .spinner{border-top-color:#626659}
+.rhine-home-error{position:absolute;z-index:3;inset:auto 24px 24px;background:#f1efe8eb;backdrop-filter:blur(10px);border:1px solid #cac9bc;padding:18px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:13px}
+.rhine-home-error[hidden]{display:none}
+.rhine-home-error-actions{display:flex;gap:8px;flex-shrink:0}
+.rhine-home-error p{margin:0;font-size:13px}
+@media(max-width:650px){.rhine-home-error{inset:auto 12px 12px;flex-direction:column;align-items:flex-start}.rhine-home-error-actions{flex-wrap:wrap}}

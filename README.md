@@ -106,6 +106,18 @@ node --test tests/video.test.mjs
 
 ## 设计与开源
 
-初始界面采用暖灰配色、玻璃档案阵列、悬停抽取和短暂展开动效，设计方向参考用户指定的 [RhineLabUI](https://github.com/LBEILC/RhineLabUI)。纸色Remotion模板也沿用细线、透明档案层和文字遮挡揭示。界面尊重“减少运动”偏好。本项目未复制其游戏或3D素材。
+首页直接在 [RhineLabUI](https://github.com/LBEILC/RhineLabUI) 原始源码上修改，源码位于 `integrations/rhinelab-ui/`。沿用原作者的 Three.js 场景、GLB 模型、玻璃材质、档案抽取、镜头运动、解密与启动轨迹，并接入光宣的剪辑、写作、项目和模型设置。科普入口保留为规划状态。
+
+首屏移除了介绍段落和重复入口，启动约5秒，可跳过或重播。回到首页会跳过重复启动；完整动效、减少运动、画质和声音偏好可在首页设置中调整，声音默认关闭。纸色Remotion模板继续使用细线、透明档案层和文字揭示。
+
+### 修改与重建首页
+
+修改 `integrations/rhinelab-ui/src/` 后运行：
+
+```powershell
+npm run build:home -- --install
+```
+
+首次安装首页构建依赖后，后续只需 `npm run build:home`。已完成构建时，可用 `npm run build:home -- --copy-only` 将产物发布到 `public/rhine/`；此命令先复制资源，最后更新HTML入口。原作者署名和许可证保存在源码与随包文件，不占用主界面。相关声明见 [第三方许可](THIRD_PARTY_NOTICES.md)。
 
 应用源码采用 [MIT许可证](LICENSE)。Remotion、FFmpeg等依赖及外部照片、标识、网页材料遵循各自许可证和使用条件。发布仓库时只分享源码与公开示例，真实项目、连接配置、密钥和私人媒体保留在本机。
