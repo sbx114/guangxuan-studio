@@ -11,7 +11,7 @@
 - [该发行标明的 FFmpeg 源码提交](https://github.com/FFmpeg/FFmpeg/commit/946fcce07b)
 - [FFmpeg 官方许可说明](https://ffmpeg.org/legal.html)
 
-应用保存的 `scripts/ffmpeg-manifest.json` 记录固定下载与 SHA256。官方包内的 LICENSE、README 和构建说明随用户取得的工具缓存保留。本体源码提交与该 Windows 构建所链接的全部外部库源码不是相同范围；若要自行再分发工具，应另外遵守相应许可的完整对应源码要求。
+应用保存的 `scripts/ffmpeg-manifest.json` 与 `scripts/distribution-runtime-manifest.json` 记录固定下载、同版本官方 GitHub 备用来源与 SHA256。官方包内的 LICENSE、README 和构建说明随应用保留在 `resources/third-party/ffmpeg`；下载的二进制和校验记录写入用户工具缓存。本体源码提交与该 Windows 构建所链接的全部外部库源码不是相同范围；若要自行再分发工具，应另外遵守相应许可的完整对应源码要求。
 
 ## yt-dlp
 
@@ -24,7 +24,7 @@
 - [Windows 构建 workflow](https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/.github/workflows/build.yml)
 - [固定版本依赖清单](https://github.com/yt-dlp/yt-dlp/tree/2026.10.26/bundle/requirements)
 
-应用的 `scripts/reference-downloader-manifest.json` 记录固定版本、大小和 SHA256，下载还与该版本官方校验清单比对。工具许可和 README 随缓存保留。Python 本体、合并的 Python 包及底层库按各自许可处理，不能以一个 yt-dlp Git 源码归档代表所有合并依赖。
+应用的 `scripts/reference-downloader-manifest.json` 与 `scripts/distribution-runtime-manifest.json` 记录固定版本、大小和已核对官方清单的 SHA256；首次运行将下载字节与固定清单中的 SHA256 比较，不另发起校验清单请求。官方 SHA2-256SUMS、GPL、源码许可和 README 随应用保留在 `resources/third-party/reference-video`，完整第三方许可通过上述固定版本官方链接提供。二进制和本次校验记录写入用户工具缓存。Python 本体、合并的 Python 包及底层库按各自许可处理，不能以一个 yt-dlp Git 源码归档代表所有合并依赖。
 
 ## Remotion 原生渲染组件
 

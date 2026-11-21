@@ -22,7 +22,7 @@ React 与 React DOM 19.2.4 使用 MIT 许可证，许可证保留在各自的依
 
 常规开发构建可随包包含未经修改的 Gyan FFmpeg 9.0.2 essentials 构建中的 `ffmpeg.exe` 与 `ffprobe.exe`，由本应用作为独立进程调用。此构建使用 GPLv3；常规包的完整许可证、原始分发说明和构建配置位于 `resources/third-party/ffmpeg`。
 
-**本次公开 Windows 安装器与便携包采用 `-PublicDistribution` 构建，不附带 FFmpeg、FFprobe、yt-dlp 或 Remotion 原生 compositor。** 首次启动从固定官方来源直接下载完整组件并验证 SHA256；随后将组件与原始许可保存在当前账户应用数据目录的 `tools/runtime-<清单哈希>/` 中。默认原生数据目录为 `%APPDATA%/Guangxuan Studio`；安装目录不承担下载缓存。本次分发来源、版本及源码入口以 `COPYRIGHT.md`、`THIRD_PARTY_SOURCES.md` 和 `scripts/distribution-runtime-manifest.json` 为准。
+**本次公开 Windows 安装器与便携包采用 `-PublicDistribution` 构建，不附带 FFmpeg、FFprobe、yt-dlp 或 Remotion 原生 compositor。** 首次启动从固定官方来源直接下载完整组件并验证 SHA256；随后将组件与校验记录保存在当前账户应用数据目录的 `tools/runtime-<清单哈希>/` 中。FFmpeg 的原始许可与构建说明随应用保留在 `resources/third-party/ffmpeg`，yt-dlp 的 GPL、源码许可、README 及官方校验清单位于 `resources/third-party/reference-video`；其他完整第三方许可提供固定版本的官方链接。默认原生数据目录为 `%APPDATA%/Guangxuan Studio`；安装目录不承担下载缓存。本次分发来源、版本及源码入口以 `COPYRIGHT.md`、`THIRD_PARTY_SOURCES.md` 和 `scripts/distribution-runtime-manifest.json` 为准。
 
 - FFmpeg 官方下载入口：https://ffmpeg.org/download.html
 - Windows 构建来源：https://www.gyan.dev/ffmpeg/builds/

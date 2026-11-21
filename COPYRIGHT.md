@@ -15,8 +15,8 @@ Gx · 光宣工作台（Guangxuan Studio）由 sbx114 发布和维护。
 | Electron / Chromium | Electron contributors / Chromium 及其第三方作者 | 按各自许可分发。桌面包根目录的 `LICENSE` 为 Electron 许可，`LICENSES.chromium.html` 为 Chromium 第三方许可。 |
 | React / React DOM | Meta Platforms, Inc. and affiliates | MIT；完整版权和许可位于相应依赖目录。 |
 | Remotion `4.0.543` | Copyright © 2026 Remotion | Remotion Free / Company License，完整原文位于 `node_modules/remotion/LICENSE.md`。它不采用本项目 MIT 许可。使用者须按自身组织及用途满足[对应版本的许可](https://github.com/remotion-dev/remotion/blob/v4.0.543/LICENSE.md)；[官方说明](https://www.remotion.dev/docs/license)和[许可问答](https://www.remotion.dev/docs/license/faq)提供进一步指引。 |
-| FFmpeg / FFprobe `9.0.2` | Copyright (c) 2000–2026 the FFmpeg developers；Gyan Windows essentials 构建 | 此构建启用 GPL 和 version3，按 GPLv3 或后续版本提供，作为独立程序调用。本次发行由应用首次配置时直接从官方取得工具；原始许可和构建说明保留在工具缓存中。 |
-| yt-dlp `2026.10.26` | yt-dlp contributors 及其所含依赖的作者 | 源码本体为 Unlicense；官方 Windows 合并可执行文件整体为 GPL-3.0-or-later。本次发行由应用首次配置时直接从官方取得工具；完整 GPL、源码许可、README 和第三方许可保留。 |
+| FFmpeg / FFprobe `9.0.2` | Copyright (c) 2000–2026 the FFmpeg developers；Gyan Windows essentials 构建 | 此构建启用 GPL 和 version3，按 GPLv3 或后续版本提供，作为独立程序调用。本次发行由应用首次配置时直接从官方取得工具；原始许可和构建说明随应用保留在 `resources/third-party/ffmpeg`。 |
+| yt-dlp `2026.10.26` | yt-dlp contributors 及其所含依赖的作者 | 源码本体为 Unlicense；官方 Windows 合并可执行文件整体为 GPL-3.0-or-later。本次发行由应用首次配置时直接从官方取得工具；GPL、源码许可、README 和官方校验清单随应用保留在 `resources/third-party/reference-video`，完整第三方许可提供固定版本官网链接。 |
 | Remotion 原生 compositor `4.0.543` | Remotion contributors；所含 FFmpeg 与编解码库原作者 | 本次发行由应用首次配置时取得官方完整平台组件。其 FFmpeg 构建代码按 GPL-2.0-or-later，Remotion 自身按独立 Free / Company License，不能混为本项目 MIT。 |
 | MiSans | Beijing Xiaomi Mobile Software Co., Ltd. / 小米 | 独立字体协议，完整原文和来源位于 `public/rhine/fonts/`；字体不按本项目 MIT 重新授权。 |
 | 开场预制英文字形 | Jan Tonellato / Synthview Type Design 的 Novecento 字体设计 | 随附的是固定字形图形；来源及使用说明见 `public/rhine/assets/boot-lettering-notice.txt`。未随附 Novecento 桌面字体或需单独许可的 webfont kit。 |
