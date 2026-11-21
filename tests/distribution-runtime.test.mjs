@@ -62,3 +62,49 @@ test('a linked tools directory is rejected before any download or write through 
   await assert.rejects(ensureDistributionRuntime({ root: state.root, dataDir: state.dataDir, platform: 'win32', fetchImpl: state.fetchImpl }), /符号链接/);
   assert.equal(state.requests.length, 0); assert.deepEqual(await readdir(other), []);
 });
+
+async function withMirror(t) {
+  const state = await fixture(t);
+  state.manifest.ffmpeg.mirrors = ['https://github.com/GyanD/codexffmpeg/releases/download/1.2.3/ffmpeg-1.2.3-essentials_build.zip'];
+  await writeFile(path.join(state.root, 'scripts', 'distribution-runtime-manifest.json'), JSON.stringify(state.manifest));
+  return state;
+}
+
+test('HTTP 503 switches to the same-version official mirror and publishes only hash-verified files', async t => {
+  const state = await withMirror(t), calls = [];
+  const bin = await ensureDistributionRuntime({ root: state.root, dataDir: state.dataDir, platform: 'win32', fetchImpl: async (url, options) => {
+    calls.push(url); return url === state.manifest.ffmpeg.url ? new Response('unavailable', { status: 503 }) : state.fetchImpl(url, options);
+  } });
+  assert.deepEqual(calls.slice(0, 2), [state.manifest.ffmpeg.url, state.manifest.ffmpeg.mirrors[0]]);
+  for (const [name, expected] of Object.entries(state.binaries)) assert.deepEqual(await readFile(path.join(bin, name)), expected);
+  assert.equal(await readFile(path.join(state.dataDir, 'original-project.txt'), 'utf8'), 'original');
+});
+
+for (const stage of ['headers', 'first-byte', 'mid-stream']) test(`a stalled ${stage} download aborts and switches to the verified official mirror`, async t => {
+  const state = await withMirror(t); let initialSignal;
+  const bin = await ensureDistributionRuntime({ root: state.root, dataDir: state.dataDir, platform: 'win32', idleTimeoutMs: 15, fetchImpl: async (url, options) => {
+    if (url !== state.manifest.ffmpeg.url) return state.fetchImpl(url, options);
+    initialSignal = options.signal;
+    if (stage === 'headers') return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }));
+    return new Response(new ReadableStream({ start(controller) { if (stage === 'mid-stream') controller.enqueue(state.archive.subarray(0, 20)); } }));
+  } });
+  assert.equal(initialSignal.aborted, true);
+  assert.deepEqual(await readFile(path.join(bin, 'ffmpeg.exe')), state.binaries['ffmpeg.exe']);
+  assert.equal((await readdir(path.join(state.dataDir, 'tools'))).some(name => name.startsWith('.download-')), false);
+});
+
+test('an official mirror with the wrong hash is rejected without publishing binaries or changing projects', async t => {
+  const state = await withMirror(t), corrupt = Buffer.from(state.archive); corrupt[corrupt.length - 1] ^= 1;
+  await assert.rejects(ensureDistributionRuntime({ root: state.root, dataDir: state.dataDir, platform: 'win32', fetchImpl: async url => url === state.manifest.ffmpeg.url ? new Response('unavailable', { status: 503 }) : new Response(corrupt) }), /校验失败/);
+  assert.deepEqual(await readdir(path.join(state.dataDir, 'tools')), []);
+  assert.equal(await readFile(path.join(state.dataDir, 'original-project.txt'), 'utf8'), 'original');
+});
+
+test('a different release or a non-official mirror is rejected before requesting any network data', async t => {
+  for (const mirror of ['https://github.com/GyanD/codexffmpeg/releases/download/2.0.0/ffmpeg-2.0.0-essentials_build.zip', 'https://example.invalid/ffmpeg.zip']) {
+    const state = await fixture(t); state.manifest.ffmpeg.mirrors = [mirror];
+    await writeFile(path.join(state.root, 'scripts', 'distribution-runtime-manifest.json'), JSON.stringify(state.manifest));
+    await assert.rejects(ensureDistributionRuntime({ root: state.root, dataDir: state.dataDir, platform: 'win32', fetchImpl: state.fetchImpl }), /同版本官方发行/);
+    assert.equal(state.requests.length, 0);
+  }
+});
