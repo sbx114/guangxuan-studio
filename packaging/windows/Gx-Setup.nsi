@@ -2,8 +2,7 @@ Unicode true
 ManifestLongPathAware true
 RequestExecutionLevel user
 CRCCheck force
-SetCompressor /SOLID lzma
-SetCompressorDictSize 64
+SetCompressor /SOLID zlib
 SetDatablockOptimize on
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
