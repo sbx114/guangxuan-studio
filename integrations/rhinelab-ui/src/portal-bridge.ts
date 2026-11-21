@@ -1,5 +1,5 @@
-export type PortalView = "video" | "writer" | "archive" | "settings";
-const allowedViews = new Set<string>(["video", "writer", "archive", "settings"]);
+export type PortalView = "video" | "writer" | "science" | "archive" | "settings" | "tasks" | "restore" | "tools" | "assistant";
+const allowedViews = new Set<string>(["video", "writer", "science", "archive", "settings", "tasks", "restore", "tools", "assistant"]);
 export const embeddedPortal = window.parent !== window;
 
 function sameOriginParent() {

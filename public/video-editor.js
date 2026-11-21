@@ -1,9 +1,11 @@
+import { mountRemotionWorkspace } from './remotion-workspace.js';
 import { api, fetchLocal, toast, showModal, icon, escapeHtml, uid, clone, timecode, saveFile, safeName } from './ui.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const seconds = value => Math.round((Number(value) || 0) * 1000) / 1000;
 const TYPES = { video: '视频', image: '图片', audio: '音频' };
 const SCENES = { title: '标题', steps: '步骤', bars: '图表', quote: '重点', outro: '结尾' };
+const FINAL_JOB_STATUSES = new Set(['complete', 'error', 'cancelled']);
 const h = escapeHtml;
 
 export function createVideoEditor({ getSettings, requireConnection, callAi, saveProject, onWriting }) {
@@ -184,7 +186,7 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
   function renderMedia() {
     const list = container?.querySelector('.media-list'); if (!list) return;
     const shown = assets.filter(asset => (mediaFilter === 'all' || asset.type === mediaFilter) && asset.name.toLowerCase().includes(search.toLowerCase()));
-    list.innerHTML = shown.length ? shown.map(asset => `<div class="media-tile" tabindex="0" role="button" draggable="true" data-media-id="${h(asset.id)}" aria-label="预览 ${h(asset.name)}" title="单击预览，双击加入时间线"><div class="media-thumb">${asset.type === 'image' ? `<img src="${h(asset.url)}" loading="lazy" alt="">` : icon(asset.type === 'audio' ? 'audio' : 'video')}${asset.generated ? '<span class="generated-marker">REMOTION</span>' : ''}<span class="media-duration">${timecode(asset.duration)}</span></div><div class="media-name" style="padding-right:25px">${h(asset.name)}</div><button class="icon-btn" style="position:absolute;right:1px;bottom:0;min-width:25px;min-height:25px" data-action="add-media" data-id="${h(asset.id)}" aria-label="添加 ${h(asset.name)}">${icon('plus')}</button></div>`).join('') : `<div class="media-empty">${icon('folder')}<p>${assets.length ? '没有匹配的素材。' : '还没有素材。导入视频、图片或音频，也可以先生成一段 AI 动画。'}</p>${assets.length ? '' : '<button class="btn small" data-action="template">体验动画模板</button>'}</div>`;
+    list.innerHTML = shown.length ? shown.map(asset => `<div class="media-tile" tabindex="0" role="button" draggable="true" data-media-id="${h(asset.id)}" aria-label="预览 ${h(asset.name)}" title="单击预览，双击加入时间线"><div class="media-thumb">${asset.type === 'image' ? `<img src="${h(asset.url)}" loading="lazy" alt="">` : icon(asset.type === 'audio' ? 'audio' : 'video')}${asset.generated ? '<span class="generated-marker">REMOTION</span>' : ''}<span class="media-duration">${timecode(asset.duration)}</span></div><div class="media-name" style="padding-right:25px">${h(asset.name)}</div><button class="icon-btn" style="position:absolute;right:1px;bottom:0;min-width:25px;min-height:25px" data-action="add-media" data-id="${h(asset.id)}" aria-label="添加 ${h(asset.name)}">${icon('plus')}</button></div>`).join('') : `<div class="media-empty">${icon('folder')}<p>${assets.length ? '没有匹配的素材。' : '还没有素材。导入视频、图片或音频，也可以先生成一段 AI 动画。'}</p>${assets.length ? '' : '<button class="btn small" data-action="ai-animation">自由创作动画</button>'}</div>`;
     const count = container.querySelector('[data-media-count]'); if (count) count.textContent = assets.length;
   }
   function renderInspector() {
@@ -405,7 +407,7 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
   }
   function scriptDialog() {
     pause();
-    dialog({ title: '旁白与剪辑脚本', body: `<p class="small muted">AI 粗剪会结合这份文案和素材信息编排片段。字幕时间需要在时间线中检查。</p><div class="form-field"><label>旁白 / 剪辑说明</label><textarea data-script rows="12" maxlength="30000" placeholder="粘贴旁白、讲解提纲或活动脚本…">${h(data().script)}</textarea></div><div class="modal-actions"><button class="btn" data-writing>${icon('pen')} 打开文案工作台</button><button class="btn primary" data-save>保存脚本</button></div>`, onMount: (root, close) => {
+    dialog({ title: '旁白与剪辑脚本', body: `<p class="small muted">根据脚本和素材安排粗剪，字幕时间可在时间线中调整。</p><div class="form-field"><label>旁白 / 剪辑说明</label><textarea data-script rows="12" maxlength="30000" placeholder="粘贴旁白、讲解提纲或活动脚本…">${h(data().script)}</textarea></div><div class="modal-actions"><button class="btn" data-writing>${icon('pen')} 打开文案工作台</button><button class="btn primary" data-save>保存脚本</button></div>`, onMount: (root, close) => {
       root.querySelector('[data-save]').onclick = () => { const text = root.querySelector('[data-script]').value; commit('更新旁白脚本', video => { video.script = text; }); close(); toast('脚本已保存'); };
       root.querySelector('[data-writing]').onclick = () => { const text = root.querySelector('[data-script]').value; commit('更新旁白脚本', video => { video.script = text; }); close(); onWriting?.(); };
     } });
@@ -490,9 +492,9 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
   }
   function editDialog() {
     pause(); const visualAssets = assets.filter(asset => asset.type !== 'audio');
-    if (!visualAssets.length) return dialog({ title: '先准备画面素材', body: `<p>AI 粗剪需要已导入的视频或图片。你可以导入本地素材，也可以生成一段 Remotion 动画。</p><div class="modal-actions"><button class="btn" data-import>${icon('upload')} 导入素材</button><button class="btn primary" data-animation>${icon('animation')} AI 动画</button></div>`, onMount: (root, close) => { root.querySelector('[data-import]').onclick = async () => { close(); try { await importMedia(); } catch (error) { toast(error.message, 'error'); } }; root.querySelector('[data-animation]').onclick = () => { close(); animationDialog(false); }; } });
+    if (!visualAssets.length) return dialog({ title: '先准备画面素材', body: `<p>请先导入视频或图片，也可生成动画。</p><div class="modal-actions"><button class="btn" data-import>${icon('upload')} 导入素材</button><button class="btn primary" data-animation>${icon('animation')} AI 动画</button></div>`, onMount: (root, close) => { root.querySelector('[data-import]').onclick = async () => { close(); try { await importMedia(); } catch (error) { toast(error.message, 'error'); } }; root.querySelector('[data-animation]').onclick = () => { close(); animationDialog(false); }; } });
     const target = project; let plan = clone(data().lastEditPlan || null), pending = false;
-    dialog({ title: 'AI 粗剪', wide: true, body: `<p class="small muted">根据素材名称、时长与旁白脚本安排片段。AI 未识别实际画面和语音，应用前请核对。</p><div class="form-field"><label>剪辑要求</label><textarea data-edit-instruction rows="3" maxlength="6000" placeholder="例如：做成节奏清楚的活动预告，先介绍主题，再展示活动亮点，最后留下参与信息。">${h(data().lastEditInstruction || '')}</textarea></div><div class="form-grid"><div class="form-field"><label>目标时长 / 秒</label><input type="number" data-edit-duration min="5" max="3600" value="${Math.min(90, Math.max(15, Math.round(duration()) || 30))}"></div><div class="form-field"><label>当前输入</label><p class="small muted">${visualAssets.length} 个画面素材 · ${data().script.length} 字脚本<br>旁白可在主界面右侧编辑</p></div></div><button class="btn primary" data-generate-edit>${icon('spark')} 生成剪辑建议</button><div data-edit-result style="margin-top:20px"></div><div data-edit-error class="notice error hidden"></div><div class="modal-actions"><button class="btn" data-close-edit>关闭</button><button class="btn olive" data-apply-edit ${plan ? '' : 'disabled'}>应用到时间线，可撤销</button></div>`, onMount: (root, close) => {
+    dialog({ title: 'AI 粗剪', wide: true, body: `<p class="small muted">按素材信息和脚本编排，未分析画面与语音，应用前请核对。</p><div class="form-field"><label>剪辑要求</label><textarea data-edit-instruction rows="3" maxlength="6000" placeholder="例如：30秒活动预告，先介绍主题，再展示亮点和参与方式。">${h(data().lastEditInstruction || '')}</textarea></div><div class="form-grid"><div class="form-field"><label>目标时长 / 秒</label><input type="number" data-edit-duration min="5" max="3600" value="${Math.min(90, Math.max(15, Math.round(duration()) || 30))}"></div><div class="form-field"><label>当前输入</label><p class="small muted">${visualAssets.length} 个画面素材 · ${data().script.length} 字脚本<br>旁白可在主界面右侧编辑</p></div></div><button class="btn primary" data-generate-edit>${icon('spark')} 生成剪辑建议</button><div data-edit-result style="margin-top:20px"></div><div data-edit-error class="notice error hidden"></div><div class="modal-actions"><button class="btn" data-close-edit>关闭</button><button class="btn olive" data-apply-edit ${plan ? '' : 'disabled'}>应用到时间线，可撤销</button></div>`, onMount: (root, close) => {
       const display = () => { root.querySelector('[data-edit-result]').innerHTML = plan ? `<div class="animation-plan-header"><strong>${h(plan.title)}</strong><p class="small" style="margin:10px 0 0">${h(plan.summary)}</p></div><div style="max-height:270px;overflow:auto">${plan.timeline.map((clip, index) => `<div class="history-row"><span>${String(index + 1).padStart(2, '0')} · ${h(assetById(clip.assetId)?.name || clip.assetId)}<br><span class="muted">${h(clip.reason || '')}</span></span><span class="mono">${timecode(clip.start)}–${timecode(clip.end)}</span></div>`).join('')}</div><p class="small muted">拟定 ${plan.captions.length} 条字幕。${h((plan.warnings || []).join(' '))}</p>` : ''; root.querySelector('[data-apply-edit]').disabled = !plan || pending; };
       display(); root.querySelector('[data-close-edit]').onclick = close;
       root.querySelector('[data-generate-edit]').onclick = async event => {
@@ -509,18 +511,20 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
       root.querySelector('[data-apply-edit]').onclick = () => {
         if (!plan || project !== target) return;
         commit('应用 AI 剪辑建议', video => { video.timeline = plan.timeline.map(clip => ({ id: uid(), assetId: clip.assetId, start: clip.start, end: clip.end })); video.captions = clone(plan.captions); video.captionSource = 'ai-draft'; selected = video.timeline[0]?.id || null; });
-        playhead = 0; syncPreview(true); close(); toast('剪辑建议已应用，可用撤销恢复原时间线。');
+        playhead = 0; syncPreview(true); close(); toast('已应用建议，可撤销。');
       };
     } });
   }
 
   function jobMarkup(job, kind) {
     if (!job) return '';
-    const finished = job.status === 'complete', failed = job.status === 'error';
+    const finished = job.status === 'complete', failed = job.status === 'error', cancelled = job.status === 'cancelled';
     const progress = Math.round(clamp(job.progress, 0, 1) * 100);
-    return `<div class="job-box"><div class="row spread"><strong>${failed ? '处理未完成' : finished ? '处理完成' : job.status === 'queued' ? '任务已排队' : '正在处理'}</strong><span class="mono">${failed ? '' : `${progress}%`}</span></div>${!failed ? `<div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>` : ''}<p class="small muted" style="margin:12px 0 0">${failed ? h(job.error || '任务未完成，请重试。') : finished ? `${job.width || ''}${job.width ? ' × ' : ''}${job.height || ''}${job.duration ? ` · ${timecode(job.duration)}` : ''} · MP4` : '进度来自本地渲染任务；可关闭此窗口，稍后回来查看。'}</p>${finished ? `<div class="row wrap" style="margin-top:15px">${kind === 'animation' && job.asset ? `<button class="btn small olive" data-add-rendered>${icon('plus')} 加入时间线</button>` : ''}<button class="btn small" data-save-rendered>${icon('download')} 保存 MP4</button></div>` : ''}${failed ? '<button class="btn small" style="margin-top:14px" data-retry-render>重试当前任务</button>' : ''}</div>`;
+    const title = cancelled ? '任务已取消' : failed ? '处理未完成' : finished ? '处理完成' : job.status === 'cancelling' ? '正在取消' : job.status === 'queued' ? '任务已排队' : '正在处理';
+    const description = cancelled ? kind === 'animation' ? '动画渲染已取消，可以重新渲染。' : '视频导出已取消，可以重新导出。' : failed ? h(job.error || '任务未完成，请重试。') : finished ? `${job.width || ''}${job.width ? ' × ' : ''}${job.height || ''}${job.duration ? ` · ${timecode(job.duration)}` : ''} · MP4` : job.status === 'cancelling' ? '正在停止本地任务，请稍候。' : '关闭窗口后仍会继续，可稍后查看进度。';
+    return `<div class="job-box"><div class="row spread"><strong>${title}</strong><span class="mono">${failed || cancelled ? '' : `${progress}%`}</span></div>${!failed && !cancelled ? `<div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>` : ''}<p class="small muted" style="margin:12px 0 0">${description}</p>${finished ? `<div class="row wrap" style="margin-top:15px">${kind === 'animation' && job.asset ? `<button class="btn small olive" data-add-rendered>${icon('plus')} 加入时间线</button>` : ''}<button class="btn small" data-save-rendered>${icon('download')} 保存 MP4</button></div>` : ''}${failed || cancelled ? `<button class="btn small" style="margin-top:14px" data-retry-render>${cancelled ? kind === 'animation' ? '重新渲染' : '重新导出' : '重试当前任务'}</button>` : ''}</div>`;
   }
-  function watchJob(target, field, jobId, { onUpdate, onComplete, onError, alive = () => true } = {}) {
+  function watchJob(target, field, jobId, { onUpdate, onComplete, onError, onCancelled, alive = () => true } = {}) {
     let stopped = false, timer = null, wake = null, controller = null;
     const stop = () => { if (stopped) return; stopped = true; clearTimeout(timer); wake?.(); controller?.abort(); polls.delete(stop); };
     polls.add(stop);
@@ -535,6 +539,7 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
             if (job.asset) { const index = assets.findIndex(asset => asset.id === job.asset.id); if (index < 0) assets.push(job.asset); else assets[index] = job.asset; }
             log(target, field === 'lastAnimationJob' ? 'Remotion 动画渲染完成' : '视频导出完成'); persist(target, true); onComplete?.(job); break;
           }
+          if (job.status === 'cancelled') { log(target, field === 'lastAnimationJob' ? '动画渲染已取消' : '视频导出已取消'); persist(target, true); onCancelled?.(job); break; }
           if (job.status === 'error') { persist(target, true); onError?.(new Error(job.error || '渲染失败，请重试。')); break; }
           await new Promise(resolve => { wake = resolve; timer = setTimeout(resolve, 900); }); wake = null;
         }
@@ -552,72 +557,15 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
     }
     const anchor = document.createElement('a'); anchor.href = job.downloadUrl || `/api/video/exports/${encodeURIComponent(job.exportId)}/file`; anchor.download = `${safeName(name)}.mp4`; anchor.click();
   }
-  function presetAnimation() {
-    return { title: '光宣动画示例', aspect: data().aspect, fps: 30, theme: 'paper', scenes: [
-      { type: 'title', duration: 5, title: '从一份素材开始', subtitle: '清楚表达每一个重要信息' },
-      { type: 'steps', duration: 7, title: '内容制作流程', items: ['确认关键信息', '组织内容结构', '检查并导出'] },
-      { type: 'outro', duration: 4, title: '让好内容被看见', subtitle: '光宣工作台 · 预置动画示例' },
-    ] };
-  }
-  function animationDialog(useTemplate) {
-    pause(); const target = project;
-    let plan = useTemplate ? presetAnimation() : clone(data().animationPlan || null), origin = useTemplate ? 'preset' : data().animationOrigin || 'ai';
-    let busy = false, stopWatch = null, job = useTemplate ? null : clone(data().lastAnimationJob || null);
-    dialog({ title: useTemplate ? '体验 Remotion 动画模板' : 'AI 动画画面', wide: true, onClose: () => stopWatch?.(), body: `<p class="small muted">AI 先组织场景，你可以修改文字和时长，再由 Remotion 渲染成 MP4，加入剪辑素材库。</p>${useTemplate ? '<div class="notice">这是可编辑的预置示例，不调用模型。点击“渲染动画”体验完整流程。</div>' : ''}<div class="form-field"><label>动画要求</label><textarea data-animation-instruction rows="3" maxlength="10000" placeholder="例如：做一段介绍学院活动的动画，先展示主题，再用三个步骤讲清参与方式，最后给出邀请。">${h(useTemplate ? '体验一份素材的内容制作流程动画。' : data().animationInstruction || '')}</textarea></div><div class="form-grid"><div class="form-field"><label>目标时长 / 秒</label><input type="number" min="3" max="90" value="${plan ? seconds(plan.scenes.reduce((sum, scene) => sum + scene.duration, 0)) : 30}" data-animation-duration></div><div class="form-field"><label>画幅</label><select data-animation-aspect>${['16:9', '9:16', '1:1'].map(value => `<option ${value === (plan?.aspect || data().aspect) ? 'selected' : ''}>${value}</option>`).join('')}</select></div></div><div class="row spread wrap" style="margin-bottom:18px"><div class="form-field" style="min-width:180px;margin:0"><label>视觉主题</label><select data-animation-theme><option value="paper" ${plan?.theme !== 'dark' ? 'selected' : ''}>纸感浅色</option><option value="dark" ${plan?.theme === 'dark' ? 'selected' : ''}>深色舞台</option></select></div><span class="small muted">使用旁白脚本 ${target.video.script.length} 字</span><button class="btn primary" data-generate-animation>${icon('spark')} ${plan ? 'AI 重新编排' : 'AI 生成场景'}</button></div><div data-animation-error class="notice error hidden"></div><div data-animation-editor></div><div data-animation-job></div><div class="modal-actions"><button class="btn" data-save-plan ${plan ? '' : 'disabled'}>${icon('file')} 保存方案</button><button class="btn olive" data-render-animation ${plan ? '' : 'disabled'}>${icon('play')} 渲染动画</button></div>`, onMount: (root, close) => {
-      const editor = root.querySelector('[data-animation-editor]'), errorBox = root.querySelector('[data-animation-error]');
-      const report = error => { if (!root.isConnected) return; errorBox.textContent = error.message; errorBox.classList.remove('hidden'); };
-      const renderEditor = () => {
-        editor.innerHTML = plan ? `<div class="animation-plan-header"><div class="row spread"><strong>${origin === 'preset' ? '预置方案' : '场景方案'}</strong><span class="pill">${plan.scenes.length} 场 · ${seconds(plan.scenes.reduce((sum, scene) => sum + scene.duration, 0))} 秒</span></div><input data-plan-title maxlength="80" style="margin-top:13px;width:100%" value="${h(plan.title)}" aria-label="动画标题"></div><div class="animation-scenes">${plan.scenes.map((scene, index) => `<section class="animation-scene" data-animation-scene="${index}"><div class="row spread"><span class="small">${String(index + 1).padStart(2, '0')} · ${SCENES[scene.type] || scene.type}</span><label class="small">时长 <input type="number" min="3" max="12" step="0.5" value="${scene.duration}" data-scene-duration style="width:62px;margin:0 3px"> 秒</label></div><input data-scene-title maxlength="40" value="${h(scene.title)}" placeholder="场景标题" aria-label="第${index + 1}场标题"><input data-scene-subtitle maxlength="100" value="${h(scene.subtitle || '')}" placeholder="补充说明（可选）" aria-label="第${index + 1}场副标题">${scene.items ? `<textarea data-scene-items rows="${Math.max(2, scene.items.length)}" placeholder="每行一个要点，最多五项">${h(scene.items.join('\n'))}</textarea>` : ''}${scene.type === 'bars' ? `<div style="margin-top:12px">${(scene.data || []).map(item => `<div class="form-grid" data-chart-row style="gap:8px"><input data-chart-label maxlength="24" value="${h(item.label)}" aria-label="数据名称"><input type="number" min="0" data-chart-value value="${item.value}" aria-label="数据数值"></div>`).join('')}<span class="tiny muted">数值需有真实依据。</span></div>` : ''}${scene.note ? `<input data-scene-note maxlength="180" value="${h(scene.note)}" placeholder="补充说明">` : ''}</section>`).join('')}</div>` : '<div class="empty-state"><p>描述需要表达的内容，AI 会生成可编辑场景。</p><button class="btn small" data-use-preset>先体验预置模板</button></div>';
-        const running = job && !['complete', 'error'].includes(job.status);
-        root.querySelector('[data-save-plan]').disabled = !plan || busy;
-        root.querySelector('[data-render-animation]').disabled = !plan || busy || Boolean(running);
-        editor.querySelector('[data-use-preset]')?.addEventListener('click', () => { plan = presetAnimation(); origin = 'preset'; job = null; renderEditor(); toast('已载入预置模板，不调用模型。'); });
-      };
-      const readPlan = () => {
-        if (!plan) throw new Error('请先生成场景或选择预置模板。');
-        const next = clone(plan); next.title = root.querySelector('[data-plan-title]').value.trim(); next.aspect = root.querySelector('[data-animation-aspect]').value; next.theme = root.querySelector('[data-animation-theme]').value; next.fps = 30;
-        next.scenes = [...editor.querySelectorAll('[data-animation-scene]')].map((row, index) => {
-          const scene = { ...next.scenes[index], title: row.querySelector('[data-scene-title]').value.trim(), subtitle: row.querySelector('[data-scene-subtitle]').value.trim(), duration: Number(row.querySelector('[data-scene-duration]').value) };
-          if (!scene.title || !Number.isFinite(scene.duration) || scene.duration < 3 || scene.duration > 12) throw new Error('每个场景需要标题，时长为 3—12 秒。');
-          if (row.querySelector('[data-scene-items]')) { scene.items = row.querySelector('[data-scene-items]').value.split('\n').map(text => text.trim()).filter(Boolean); if (!scene.items.length || scene.items.length > 5 || scene.items.some(text => text.length > 50)) throw new Error('每场最多五个要点，每项不超过 50 字。'); }
-          if (scene.type === 'bars') { scene.data = [...row.querySelectorAll('[data-chart-row]')].map(item => ({ label: item.querySelector('[data-chart-label]').value.trim(), value: Number(item.querySelector('[data-chart-value]').value) })); if (!scene.data.length || scene.data.some(item => !item.label || !Number.isFinite(item.value) || item.value < 0)) throw new Error('请检查图表标签与非负数值。'); }
-          if (row.querySelector('[data-scene-note]')) scene.note = row.querySelector('[data-scene-note]').value.trim();
-          return scene;
-        });
-        if (!next.title || !next.scenes.length || next.scenes.length > 8 || next.scenes.reduce((sum, scene) => sum + scene.duration, 0) > 90) throw new Error('动画需要标题，最多八场，总时长不超过 90 秒。');
-        return next;
-      };
-      const storePlan = () => { plan = readPlan(); target.video.animationPlan = clone(plan); target.video.animationOrigin = origin; target.video.animationInstruction = root.querySelector('[data-animation-instruction]').value; persist(target); };
-      const updateJob = next => { job = { ...job, ...next }; if (!root.isConnected) return; root.querySelector('[data-animation-job]').innerHTML = jobMarkup(job, 'animation'); root.querySelector('[data-render-animation]').disabled = !plan || busy || !['complete', 'error'].includes(job.status); };
-      const beginWatch = () => { if (!root.isConnected) return; stopWatch?.(); stopWatch = watchJob(target, 'lastAnimationJob', job.jobId, { alive: () => root.isConnected, onUpdate: updateJob, onComplete: completed => { updateJob(completed); if (connected()) { renderMedia(); renderInspector(); } toast('Remotion 动画已生成，可加入时间线。'); }, onError: report }); };
-      const renderAnimation = async () => {
-        try {
-          storePlan(); errorBox.classList.add('hidden');
-          const result = await api('/api/video/render-animation', { plan, prompt: target.video.animationInstruction || '', model: origin === 'preset' ? 'preset-template' : target.video.animationModel || getSettings().model || '' });
-          job = { jobId: result.jobId, status: 'queued', progress: 0, title: plan.title, createdAt: new Date().toISOString() }; target.video.lastAnimationJob = clone(job); log(target, origin === 'preset' ? '开始渲染预置动画' : '开始渲染 AI 动画'); persist(target, true); updateJob(job); beginWatch();
-        } catch (error) { report(error); }
-      };
-      renderEditor(); if (job) { updateJob(job); if (!['complete', 'error'].includes(job.status)) beginWatch(); }
-      root.querySelector('[data-generate-animation]').onclick = async event => {
-        if (busy) return; if (!requireConnection()) return close();
-        const instruction = root.querySelector('[data-animation-instruction]').value.trim();
-        if (!instruction && !target.video.script.trim()) return report(new Error('请填写动画要求，或先准备旁白脚本。'));
-        const payload = { instruction, script: target.video.script, aspect: root.querySelector('[data-animation-aspect]').value, theme: root.querySelector('[data-animation-theme]').value, durationTarget: Number(root.querySelector('[data-animation-duration]').value) };
-        busy = true; event.currentTarget.disabled = true; event.currentTarget.innerHTML = '<span class="spinner"></span> 正在组织场景…'; errorBox.classList.add('hidden');
-        try {
-          const result = await callAi('animation-plan', payload); plan = result.data; origin = 'ai'; target.video.animationPlan = clone(plan); target.video.animationOrigin = origin; target.video.animationInstruction = instruction; target.video.animationModel = result.meta?.model || getSettings().model; rememberRun(target, 'animation-plan', result, '生成 Remotion 动画方案');
-        } catch (error) { report(error); }
-        finally { busy = false; if (root.isConnected) { const button = root.querySelector('[data-generate-animation]'); button.disabled = false; button.innerHTML = `${icon('spark')} AI 重新编排`; renderEditor(); } }
-      };
-      root.querySelector('[data-save-plan]').onclick = () => { try { storePlan(); log(target, '保存动画场景修改'); persist(target, true); toast('动画方案已保存'); } catch (error) { report(error); } };
-      root.querySelector('[data-render-animation]').onclick = renderAnimation;
-      root.querySelector('[data-animation-job]').onclick = async event => {
-        try {
-          if (event.target.closest('[data-add-rendered]') && job?.asset) { if (project !== target) return; addAsset(job.asset.id); close(); }
-          else if (event.target.closest('[data-save-rendered]')) await saveJob(job, job.title || plan?.title || '光宣动画');
-          else if (event.target.closest('[data-retry-render]')) await renderAnimation();
-        } catch (error) { report(error); }
-      };
+  function animationDialog() {
+    pause(); const target = project; let workspace;
+    dialog({ title: 'Remotion 自由创作', wide: true, body: '<div data-remotion-workspace></div>', onClose: () => workspace?.dispose(), onMount: root => {
+      workspace = mountRemotionWorkspace(root.querySelector('[data-remotion-workspace]'), {
+        project: target, getSettings, requireConnection, saveProject: value => saveProject(value),
+        loadContext: () => api('/api/openfilm/context?projectId=' + encodeURIComponent(target.id)),
+        onChanged: async () => { if (connected() && project.id === target.id) await refreshAssets(); },
+        legacyPlan: target.video.animationPlan || target.video.openfilmAnimationPlan,
+      });
     } });
   }
   function exportDialog() {
@@ -627,7 +575,7 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
     dialog({ title: '导出视频', onClose: () => stopWatch?.(), body: `<div class="form-grid"><div class="form-field"><label>文件名</label><input data-export-name value="${h(project.title)}" maxlength="100"></div><div class="form-field"><label>分辨率</label><select data-export-resolution><option value="720" ${data().resolution === '720' ? 'selected' : ''}>720P</option><option value="1080" ${data().resolution === '1080' ? 'selected' : ''}>1080P</option></select></div></div><div class="notice"><span>${h(data().aspect)} · ${timecode(total)} · ${data().timeline.length} 个片段 · ${data().captions.length} 条字幕<br>导出会拼接片段，并应用字幕、原声和配乐设置。</span></div><div data-export-error class="notice error hidden"></div><div data-export-job></div><div class="modal-actions"><button class="btn" data-caption-settings>检查字幕</button><button class="btn primary" data-start-export>${icon('download')} 开始导出</button></div>`, onMount: (root, close) => {
       const errorBox = root.querySelector('[data-export-error]');
       const report = error => { if (!root.isConnected) return; errorBox.textContent = error.message; errorBox.classList.remove('hidden'); };
-      const update = state => { job = { ...job, ...state }; if (!root.isConnected) return; root.querySelector('[data-export-job]').innerHTML = jobMarkup(job, 'export'); root.querySelector('[data-start-export]').disabled = pending || !['complete', 'error'].includes(state.status); };
+      const update = state => { job = { ...job, ...state }; if (!root.isConnected) return; root.querySelector('[data-export-job]').innerHTML = jobMarkup(job, 'export'); root.querySelector('[data-start-export]').disabled = pending || !FINAL_JOB_STATUSES.has(state.status); };
       const beginWatch = () => { if (!root.isConnected) return; stopWatch?.(); stopWatch = watchJob(target, 'lastExportJob', job.jobId, { alive: () => root.isConnected, onUpdate: update, onComplete: done => { update(done); toast('视频已导出，点击“保存 MP4”选择保存位置。'); }, onError: report }); };
       const start = async () => {
         if (pending) return;
@@ -644,7 +592,7 @@ export function createVideoEditor({ getSettings, requireConnection, callAi, save
       root.querySelector('[data-start-export]').onclick = start;
       root.querySelector('[data-caption-settings]').onclick = () => { close(); captionsDialog(); };
       root.querySelector('[data-export-job]').onclick = async event => { try { if (event.target.closest('[data-save-rendered]')) await saveJob(job, root.querySelector('[data-export-name]').value || target.title); else if (event.target.closest('[data-retry-render]')) await start(); } catch (error) { report(error); } };
-      if (job) { update(job); if (!['complete', 'error'].includes(job.status)) beginWatch(); }
+      if (job) { update(job); if (!FINAL_JOB_STATUSES.has(job.status)) beginWatch(); }
     } });
   }
 

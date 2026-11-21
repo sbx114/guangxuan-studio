@@ -9,23 +9,23 @@
 
    One set of names, a light and a dark value for each. Components use these names and no colors of their own.
 
-   Neutrals are a cool gray, and color is kept for meaning. Backgrounds, from the bottom up: the app (the window, the
+   Light neutrals follow the archive's warm paper palette, and color is kept for meaning. Backgrounds, from the bottom up: the app (the window, the
    top bar and the seams between panes), a panel, what is raised over a panel (cards, menus, popovers, dialogs,
    tooltips). On any of them: a field (inputs, wells, chips), hover, pressed, and selected. Fields, hover and pressed
    are translucent, so they read the same on every layer. Text: primary, muted (secondary), faint (hints, placeholders,
    idle icons). Lines: a hairline and a stronger one.
 
-   The main action is ink: near black in light, near white in dark. One accent, the brand teal, for what is selected,
-   current or focused (switches, progress, tabs, the frame on the picture); ok, warn and err for states. The timeline
+   The main action is ink: near black in light, near white in dark. One accent for what is selected,
+   current or focused (warm orange in light, teal in dark); ok, warn and err for states. The timeline
    keeps to white (ink in light) for its playhead and a picked clip's frame.
 
    Clips on the timeline by kind, one quiet color each at one lightness, under white words; their waveforms are drawn
    lighter over it. Sounds of all kinds are one color. */
 
 :root {
-  --font-cjk-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC',
+  --font-cjk-sans: 'MiSans', 'Mi Sans', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Source Han Sans SC',
     'Heiti SC', sans-serif;
-  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+  --font-sans: 'MiSans', 'Mi Sans', 'Microsoft YaHei', 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
     Arial, var(--font-cjk-sans);
   --font-mono: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
@@ -42,40 +42,40 @@
 [data-theme='light'] {
   color-scheme: light;
 
-  --bg-app: #e4e4e8;
+  --bg-app: #e8e5e1;
   --bg-titlebar: var(--bg-app);
-  --bg-panel: #fbfbfc;
-  --bg-raised: #ffffff;
-  /* the viewer's pane, round the picture: the panels' own white (rgb 251, 251, 252) */
-  --bg-viewer: #fbfbfc;
+  --bg-panel: #f2f0ec;
+  --bg-raised: #fbfaf7;
+  /* the viewer's pane uses the same warm paper as the editing panels */
+  --bg-viewer: #f2f0ec;
   /* the one-pixel lines between the panes and under the top bar (the board under them showing through) */
-  --dock-line: #d2d2d8;
-  --bg-field: rgba(16, 16, 24, 0.055);
-  --bg-hover: rgba(16, 16, 24, 0.05);
-  --bg-pressed: rgba(16, 16, 24, 0.09);
-  --bg-selected: rgba(0, 163, 174, 0.13);
+  --dock-line: #cdc8be;
+  --bg-field: rgba(32, 33, 31, 0.055);
+  --bg-hover: rgba(32, 33, 31, 0.05);
+  --bg-pressed: rgba(32, 33, 31, 0.09);
+  --bg-selected: rgba(173, 91, 50, 0.13);
 
-  --text: #161619;
-  --text-muted: #5d5d63;
-  --text-faint: #8b8b92;
+  --text: #20211f;
+  --text-muted: #656158;
+  --text-faint: #858075;
 
-  --border: rgba(16, 16, 24, 0.085);
-  --border-strong: rgba(16, 16, 24, 0.16);
+  --border: rgba(32, 33, 31, 0.11);
+  --border-strong: rgba(32, 33, 31, 0.20);
 
-  --primary: #161619;
-  --primary-hover: #2e2e33;
-  --on-primary: #ffffff;
+  --primary: #20211f;
+  --primary-hover: #363830;
+  --on-primary: #fbfaf7;
 
-  --accent: #0098a3;
-  --accent-soft: rgba(0, 163, 174, 0.12);
-  --on-accent: #ffffff;
+  --accent: #ad5b32;
+  --accent-soft: rgba(173, 91, 50, 0.12);
+  --on-accent: #fbfaf7;
   /* a switch turned on: the accent a step quieter, so a page of them does not glare */
-  --switch-on: #26b0ba;
+  --switch-on: #bd7149;
   /* what is picked among choices (tabs, a rail, a list): the accent's words on the accent's own tint, never a grey
      that reads as merely pointed at */
-  --bg-picked: rgba(0, 163, 174, 0.14);
+  --bg-picked: rgba(173, 91, 50, 0.14);
   /* words selected in a field */
-  --text-selection: rgba(0, 163, 174, 0.24);
+  --text-selection: rgba(173, 91, 50, 0.24);
 
   --ok: #1f8a4c;
   --warn: #b25e00;
@@ -95,7 +95,7 @@
 
   /* the timeline's own: a well (meters), the playhead and the frame of a picked clip, and waveforms drawn lighter
      over a clip's own color (canvas reads these back from the element) */
-  --tl-lane: #f1f1f3;
+  --tl-lane: #e9e5df;
   /* a track's band, the ground seen in the gaps between two (the panel itself), and the track of a picked clip: the
      panel a quiet step darker (lighter in dark), the picked one a step further */
   --tl-row: rgba(16, 16, 24, 0.03);
@@ -587,31 +587,31 @@ html[data-file-drag] iframe { pointer-events: none; }
    main button white. A wire is grey, and blue and moving while it is the selected node's. */
 :root,
 [data-theme='light'] {
-  --cv-bg: #f4f4f5;
-  --cv-dot: #c9c9cd;
-  --cv-card: #ffffff;
-  --cv-card-2: #f1f1f2;
-  --cv-line: #d4d4d8;
-  --cv-line-hover: #b4b4ba;
-  --cv-ring: #5c5c62;
-  --cv-label: #77777d;
-  --cv-ghost: #c4c4c8;
-  --cv-ink: #111113;
+  --cv-bg: #eae6df;
+  --cv-dot: #c8c0b3;
+  --cv-card: #fbfaf7;
+  --cv-card-2: #f0ece5;
+  --cv-line: #cdc6ba;
+  --cv-line-hover: #b2a898;
+  --cv-ring: #5f5b52;
+  --cv-label: #787166;
+  --cv-ghost: #c5bdae;
+  --cv-ink: #20211f;
   --cv-ink-2: rgba(17, 17, 19, 0.6);
   --cv-ink-3: rgba(17, 17, 19, 0.32);
-  --cv-edge: #b4b4ba;
-  --cv-edge-lit: #3b82f6;
-  --cv-float: #ffffff;
+  --cv-edge: #b2a898;
+  --cv-edge-lit: var(--accent);
+  --cv-float: #fbfaf7;
   --cv-float-line: rgba(0, 0, 0, 0.08);
   --cv-float-hover: rgba(0, 0, 0, 0.05);
   --cv-chip: rgba(0, 0, 0, 0.05);
-  --cv-bar: #ffffff;
-  --cv-bar-line: #e4e4e7;
-  --cv-invert: #111113;
-  --cv-on-invert: #ffffff;
+  --cv-bar: #fbfaf7;
+  --cv-bar-line: #ded8ce;
+  --cv-invert: #20211f;
+  --cv-on-invert: #fbfaf7;
   --cv-shadow: none;
   --cv-float-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06), 0 16px 24px -8px rgba(0, 0, 0, 0.1), 0 4px 8px -4px rgba(0, 0, 0, 0.06);
-  --cv-modal: #ffffff;
+  --cv-modal: #fbfaf7;
   --cv-group: rgba(0, 0, 0, 0.08);
 }
 [data-theme='dark'] {

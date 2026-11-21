@@ -77,7 +77,9 @@ test('health and prompt catalog are available without secrets', async () => {
   const health = await request('/api/health');
   assert.equal(health.response.status, 200); assert.equal(health.data.ok, true);
   const catalog = await request('/api/prompts');
-  assert.equal(catalog.data.tasks.length, 6); assert.ok(catalog.data.version);
+  assert.equal(catalog.data.tasks.length, 14); assert.ok(catalog.data.tasks.some(task => task.id === 'science')); assert.ok(catalog.data.tasks.some(task => task.id === 'edit-assistant')); assert.ok(catalog.data.tasks.some(task => task.id === 'visual-novel')); assert.ok(catalog.data.version);
+  assert.deepEqual(new Set(catalog.data.tasks.map(task => task.id)), new Set(['extract', 'generate', 'review', 'rewrite', 'science', 'edit-assistant', 'edit-plan', 'edit-placement', 'animation-plan', 'visual-novel', 'writing-draft', 'writing-revise', 'remotion-project', 'remotion-review']));
+  assert.equal(catalog.data.tasks.find(task => task.id === 'edit-placement').label, 'AI放置安排');
 });
 
 test('base URL normalization preserves version paths and accepts exact endpoints', () => {

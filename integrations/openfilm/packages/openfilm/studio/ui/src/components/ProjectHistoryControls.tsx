@@ -58,10 +58,12 @@ export function ProjectHistoryButton({
   open,
   onClick,
   className,
+  disabled = false,
 }: {
   open: boolean;
   onClick: () => void;
   className?: string;
+  disabled?: boolean;
 }) {
   const t = useT();
   return (
@@ -69,6 +71,7 @@ export function ProjectHistoryButton({
       <button
         type="button"
         onClick={onClick}
+        disabled={disabled}
         aria-label={t('projectMenu.history')}
         aria-haspopup="dialog"
         aria-expanded={open}

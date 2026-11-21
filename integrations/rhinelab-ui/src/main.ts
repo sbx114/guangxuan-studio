@@ -7,10 +7,9 @@ import { escapeHtml } from "./html";
 import {
   normalizeQuality,
   qualityPresets,
-  type QualityPreset,
   type RenderQuality,
 } from "./render-quality";
-import { qualityMarkup, syncQualityUI } from "./quality-settings";
+import { qualityMarkup, syncQualityUI, type PerformanceMode } from "./quality-settings";
 import { superPerformanceQuality, wallpaperQuality } from "./wallpaper-quality";
 import "@kitlangton/rolling-number/styles.css";
 import "./style.css";
@@ -22,11 +21,10 @@ import {
   createRollingNumber,
   createRollingText,
 } from "@kitlangton/rolling-number";
-import { ArchiveScene } from "./scene";
-import { ModelViewer } from "./model-viewer";
+import type { ArchiveScene } from "./scene";
+import type { ModelViewer } from "./model-viewer";
 import { ContentTransition, SurfaceTransition } from "./ui-transitions";
-import { BootSequence } from "./boot";
-import { loadBootWebfonts } from "./boot-lettering";
+import type { BootSequence } from "./boot";
 import { wrap, type ArchiveNavigation } from "./archive-loop";
 import {
   records,
@@ -75,7 +73,16 @@ const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
 import { logo, brandHeading } from "./brand";
 import { embeddedPortal, portalReady, openPortalView, fromPortalParent, sendPortalMessage } from "./portal-bridge";
 import { projectDetailsMarkup } from "./project-details";
+import { paintCoverPicker, readProjectCover, readProjectCoverAssetId, restoreProjectCover, uploadProjectCover, type ArchiveCoverId } from "./archive-cover";
 import "./guangxuan.css";
+import { archiveWorkspaces, isArchiveWorkspace, nextWorkspace, workspaceForKind, workspaceLane, type ArchiveWorkspace } from "./workspace-navigation";
+import "./workspace-navigation.css";
+import "./archive-cover.css";
+
+const reviewParams = new URLSearchParams(location.search);
+const reviewEntry = reviewParams.has("scene") || reviewParams.has("time") || reviewParams.get("review") === "1";
+$("#stage").dataset.opening = "cinematic";
+performance.mark("gx:home:entry");
 
 $("#stage").innerHTML = `
   <div id="three-scene" class="three-scene"></div>
@@ -83,6 +90,7 @@ $("#stage").innerHTML = `
   <div id="boot-background" class="boot-background"><svg viewBox="0 0 1920 1080" preserveAspectRatio="none"><g fill="none" stroke="#fff" stroke-width="3"><path d="M-210 705C-45 705 182 704 247 567C337 377 99 306 4 435S27 680 169 631C309 584 227 314 279 111S568-113 568-113"/><path d="M1560-80C1374 114 1671 168 1601 323S1371 367 1431 480S1692 666 1559 787S1329 886 1498 1130"/><circle cx="1450" cy="648" r="346"/><circle cx="1450" cy="648" r="348"/></g></svg></div>
   <header class="brand">${brandHeading}</header>
   <nav class="system-nav" aria-label="系统导航">
+    <div class="archive-workspace-tabs" role="group" aria-label="功能切换" hidden inert aria-hidden="true" style="display:none">${archiveWorkspaces.map((item, index) => `<button data-action="workspace-${item.view}" data-workspace="${item.view}" aria-pressed="${index === 0}">${item.label}</button>`).join("")}</div>
     <button data-action="search"><span class="nav-glyph">⌕</span> 索引 <span class="key">/</span></button>
     <button data-action="new-project" aria-label="新建项目">＋ 新建</button>
     <button data-action="projects" aria-label="项目档案">项目 <span id="saved-count" hidden>00</span></button>
@@ -95,41 +103,54 @@ $("#stage").innerHTML = `
     <div class="boot-logo">${logo}</div>
     <div class="auth-status"><span>▪</span> <span id="auth-message"></span><i></i></div>
     <div class="scan"><svg viewBox="0 0 1920 1080" aria-hidden="true"><g fill="none" stroke="#080a08" stroke-width="2" stroke-linecap="round"><path/><path stroke="#fff"/><path/><path/><path/><path/><circle class="orbit-dot" r="8" fill="#ed821b" stroke="none"/><circle class="orbit-dot" r="8" fill="#ed821b" stroke="none"/><circle class="scan-core" cx="960" cy="540" r="5" fill="#080a08" stroke="none"/></g></svg><span>WORKSPACE READY</span></div>
-    <div class="welcome"><div class="welcome-panel"></div><div class="welcome-heading">WELCOME TO</div><div class="welcome-company"><strong>GUANGXUAN</strong><strong class="welcome-highlight" aria-hidden="true">GUANGXUAN</strong></div><div class="welcome-database">CREATIVE WORKSPACE</div><div class="welcome-logo">${logo}</div></div>
+    <div class="welcome"><div class="welcome-panel"></div><div class="welcome-heading">WELCOME TO</div><div class="welcome-company"><strong>Gx</strong><strong class="welcome-highlight" aria-hidden="true">Gx</strong></div><div class="welcome-database">CREATIVE WORKSPACE</div><div class="welcome-logo">${logo}</div></div>
   </section>
   <svg id="inspection-marks" viewBox="0 0 1920 1080" aria-hidden="true"><path id="inspection-lines"/><g id="inspection-corners"></g><circle id="inspection-point" r="1.8"/></svg>
-  <div id="inspection-text" aria-hidden="true">WORKSPACE:<strong>LOCAL CREATIVE TOOLS</strong></div>
+  <div id="inspection-text" aria-hidden="true"><strong></strong></div>
   <section id="archive-ui" class="archive-ui" aria-label="项目档案">
     <div id="project-empty" class="project-empty"><h2 id="project-empty-title">正在读取项目</h2><button class="solid-button" data-action="new-project">新建项目 <span>＋</span></button><button class="project-sync" data-action="sync-projects">刷新项目</button></div>
-    <div class="archive-callout"><div class="eyebrow">CREATIVE WORKSPACE <span>／</span> <span id="archive-category">视频剪辑</span></div><button class="file-title" data-action="open">FILE NUMBER: <span id="selected-id">P-<span id="selected-code">001</span></span><span class="file-open">↗</span></button><div class="callout-rule"><i></i></div><div class="file-summary"><span id="selected-title">光宣工作台</span><span id="selected-clearance">BUSINESS AREA</span></div><button class="read-file" data-action="open">进入 <span>→</span></button></div>
-    <div id="hover-label" class="hover-label" hidden>P-<span id="hover-code">001</span> / <span id="hover-title"></span></div>
-    <div class="archive-counter"><span class="tiny-label">ARCHIVE / SELECT</span><div><span id="selected-number">01</span><i>/</i><span class="count-total">12</span></div></div>
+    <div class="archive-callout"><div class="eyebrow"><span id="archive-category">视频剪辑</span></div><button class="file-title" data-action="open" aria-label="打开项目信息"> <span id="selected-title">未选择项目</span><span id="selected-id" hidden aria-hidden="true"><span id="selected-code">001</span></span><span class="file-open" aria-hidden="true">↗</span></button><div class="callout-rule"><i></i></div><div class="file-summary" hidden aria-hidden="true"><span id="selected-clearance"></span></div><button class="read-file" data-action="open">项目信息 <span>→</span></button></div>
+    <div id="hover-label" class="hover-label" hidden><span id="hover-code" hidden aria-hidden="true">001</span><span id="hover-title"></span></div>
+    <div class="archive-counter"><span class="tiny-label">项目</span><div><span id="selected-number">01</span><i>/</i><span class="count-total">12</span></div></div>
     <div class="archive-navigation"><button data-action="prev" aria-label="上一个档案">↑</button><div id="file-ticks" class="file-ticks"></div><button data-action="next" aria-label="下一个档案">↓</button></div>
-    <div class="column-navigation"><button data-action="column-prev" aria-label="上一列">←</button><div><span id="column-number">COLUMN <span id="column-index">03</span> / 05</span><strong id="column-name">视频剪辑</strong></div><button data-action="column-next" aria-label="下一列">→</button></div>
-    <div class="archive-hint"><kbd>←</kbd> <kbd>→</kbd> 切换 <span>／</span> <kbd>ENTER</kbd> 进入</div>
+    <div class="column-navigation"><button data-action="column-prev" aria-label="上一个工作区">←</button><div><span id="column-number" hidden aria-hidden="true"><span id="column-index">01</span> / 03</span><strong id="column-name">视频剪辑</strong></div><button data-action="column-next" aria-label="下一个工作区">→</button></div>
+    <div class="archive-hint"><kbd>←</kbd> <kbd>→</kbd> 切换工作区 <span>／</span> <kbd>↑</kbd> <kbd>↓</kbd> 同类项目 <span>／</span> <kbd>ENTER</kbd> 信息</div>
   </section>
   <section id="detail-ui" class="detail-ui" aria-label="档案内容" hidden>
-    <button class="back-button" data-action="back">← <span>ARCHIVE OVERVIEW</span><small>ESC</small></button>
-    <div class="object-caption"><span id="object-id">NO.001</span><div>CREATIVE WORKSPACE</div><small>DRAG TO INSPECT <span>↔</span></small><button class="viewer-open" data-action="model-viewer">360° 查看文档模型 <span>↗</span></button></div>
+    <button class="back-button" data-action="back">← <span>返回项目</span><small>ESC</small></button>
+    <div class="object-caption"><span id="object-id" hidden aria-hidden="true"></span><small>拖动查看 <span>↔</span></small><button class="viewer-open" data-action="model-viewer">查看模型 <span>↗</span></button></div>
     <article id="detail-content" class="detail-content"></article>
   </section>
   <div class="powered" aria-hidden="true"></div>
   <footer class="system-footer"><span><i class="status-light"></i>本地工作区</span><span id="clock">00:00:00</span><button data-action="replay" title="重播启动动画">重播启动 ↻</button></footer>
   <div id="modal-root"></div><div id="toast" class="toast" role="status"></div>
-  <div id="loading" class="loading"><div class="loading-mark">${logo}</div><span>正在载入工作台</span><i></i></div>
+  <div id="loading" class="loading" role="status" aria-label="正在启动 Gx"><div class="loading-mark">${logo}</div><span>正在打开 Gx</span><i aria-hidden="true"></i></div>
 `;
 
 $("#boot-background").insertAdjacentHTML(
   "beforeend",
   '<div class="boot-white"></div>',
 );
-const bootSequence = new BootSequence($("#stage"));
+let bootSequence: BootSequence | undefined;
+let bootPreparation: Promise<BootSequence> | undefined;
+function prepareBootSequence() {
+  return bootPreparation ??= Promise.all([import("./boot"), import("./boot-lettering")]).then(async ([{ BootSequence }, { loadBootWebfonts }]) => {
+    bootSequence = new BootSequence($("#stage"));
+    await loadBootWebfonts();
+    return bootSequence;
+  });
+}
 $("#viewport").insertAdjacentHTML(
   "beforeend",
   '<button class="mobile-entry" data-action="skip">进入档案 <span>→</span></button>',
 );
 
 type Mode = "boot" | "archive" | "detail";
+let archiveWorkspace: ArchiveWorkspace = 'video';
+try { const stored = localStorage.getItem('guangxuan-archive-workspace'); if (isArchiveWorkspace(stored)) archiveWorkspace = stored; } catch { /* Per-session navigation also works without storage. */ }
+let allProjectSummaries: unknown[] = [];
+let archiveNavigationBusy = false;
+const workspaceMemory = new Map<ArchiveWorkspace, string>();
 let mode: Mode = "boot",
   selected = -1,
   bootStart = 0,
@@ -139,11 +160,12 @@ let modal: "search" | "saved" | "settings" | null = null,
   searchQuery = "",
   filter = "全部档案";
 let activeTab = "overview";
-const reviewParams = new URLSearchParams(location.search);
 const portalBootRate = 6.4;
+const textOpeningEnd = 21.92;
 let detailDirty = false;
 let editorLoadingId: string | null = null;
-let pendingSave: { requestId: string; projectId: string; title: string; description: string; resolve: (record: ArchiveRecord) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+let pendingSave: { requestId: string; projectId: string; title: string; description: string; cover: ArchiveCoverId; coverAssetId: string; resolve: (record: ArchiveRecord) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+let pendingCoverUpload: { projectId: string; controller: AbortController } | null = null;
 let requestedVisible = true;
 let renderActive = !document.hidden;
 let hiddenAt: number | null = renderActive ? null : performance.now();
@@ -151,6 +173,8 @@ let suspendedSeconds = 0;
 let frameHandle: number | null = null;
 let interactionUntil = 0;
 let lastFrameAt = 0;
+let preparingOpening = false;
+let openingPreparation: Promise<void> | undefined;
 let publishedHomeState = "";
 const timelineNow = () => (renderActive || hiddenAt === null ? performance.now() : hiddenAt) / 1000 - suspendedSeconds;
 function interact(duration = 2000) { interactionUntil = Math.max(interactionUntil, performance.now() + duration); }
@@ -173,12 +197,18 @@ function syncRenderVisibility() {
     frameStart = performance.now(); frameCount = 0; lastFrameAt = 0; interact(1600); scheduleFrame();
   }
 }
+for (const [action, label] of [['assistant', 'AI 助手'], ['tasks', '任务'], ['restore', '恢复']]) {
+  const control = document.createElement('button');
+  control.dataset.action = action; control.textContent = label;
+  control.setAttribute('aria-label', action === 'assistant' ? 'AI 助手' : action === 'tasks' ? '任务中心' : '恢复完整项目包');
+  document.querySelector('.system-nav')?.insertBefore(control, document.querySelector('.system-nav [data-action="settings"]'));
+}
 function publishHomeState() {
   if (mode === "boot" || !projectsReady) return;
-  const identity = mode + ":" + (records[selected]?.id || "");
+  const identity = mode + ":" + archiveWorkspace + ":" + (records[selected]?.id || "");
   if (identity === publishedHomeState) return;
   publishedHomeState = identity;
-  sendPortalMessage({ type: "guangxuan:home-state", mode, projectId: records[selected]?.id });
+  sendPortalMessage({ type: "guangxuan:home-state", mode, projectId: records[selected]?.id, workspace: archiveWorkspace });
 }
 function portalBootTime(elapsed: number) { return 1.76 + Math.max(0, elapsed - 1.76) * portalBootRate; }
 let frozenTime =
@@ -232,6 +262,8 @@ const storedPrefs = readLocal<
     quality: boolean;
     rendering: RenderQuality;
     superPerformance: boolean;
+    superPerformanceExplicit: boolean;
+    displayMode: PerformanceMode;
     colorTheme: "light" | "dark";
     qualityExplicit: boolean;
     motion: StoredMotion;
@@ -246,7 +278,9 @@ const initialMotion = createMotionPreferences(
       : undefined),
 );
 const initialMotionPreset = motionPresetFor(initialMotion);
-const oldDefaultQuality = storedPrefs.rendering && !storedPrefs.qualityExplicit && Object.entries(qualityPresets.original).every(([key, value]) => storedPrefs.rendering?.[key as keyof RenderQuality] === value);
+// Previous versions automatically enabled the fast renderer. Only the new,
+// explicit two-choice preference opts into it; existing users regain original visuals.
+const initialDisplayMode: PerformanceMode = storedPrefs.displayMode === "smooth" ? "smooth" : "original";
 const prefs = {
   sound: storedPrefs.sound ?? false,
   music: storedPrefs.music ?? false,
@@ -254,13 +288,13 @@ const prefs = {
   musicVolume: storedPrefs.musicVolume ?? 0.12,
   motion: initialMotion,
   motionPreset: initialMotionPreset,
-  quality: storedPrefs.quality ?? true,
-  superPerformance: storedPrefs.superPerformance ?? false,
-  qualityExplicit: storedPrefs.qualityExplicit ?? false,
-  rendering: normalizeQuality(
-    oldDefaultQuality ? undefined : storedPrefs.rendering,
-    storedPrefs.quality !== false,
-  ),
+  displayMode: initialDisplayMode,
+  quality: isWallpaper ? storedPrefs.quality ?? true : true,
+  superPerformance: isWallpaper ? storedPrefs.superPerformance ?? false : initialDisplayMode === "smooth",
+  superPerformanceExplicit: true,
+  qualityExplicit: true,
+  rendering: isWallpaper ? normalizeQuality(storedPrefs.rendering, storedPrefs.quality !== false)
+    : { ...qualityPresets[initialDisplayMode === "smooth" ? "performance" : "original"] },
   colorTheme: storedPrefs.colorTheme === "dark" ? "dark" : "light",
 };
 const motionActive = (key: MotionKey) => motionEnabled(prefs.motion, key);
@@ -301,6 +335,17 @@ const selectionTitle = createRollingText($("#selected-title"), {
   ...textOptions,
   text: $("#selected-title").textContent ?? "",
 });
+// Rolling glyphs cannot paint a native ellipsis; use their semantic text on overflow.
+const selectionTitleNode = $("#selected-title");
+const selectionTitleValue = selectionTitleNode.querySelector<HTMLElement>(".rn-value")!;
+const refreshTitleOverflow = () => selectionTitleNode.classList.toggle(
+  "is-truncated", selectionTitleNode.clientWidth > 0 && selectionTitleValue.scrollWidth > selectionTitleNode.clientWidth + 1,
+);
+const selectionTitleSizes = new ResizeObserver(refreshTitleOverflow);
+selectionTitleSizes.observe(selectionTitleNode);
+selectionTitleSizes.observe(selectionTitleNode.querySelector(".rn-measure")!);
+new MutationObserver(refreshTitleOverflow).observe(selectionTitleValue, { childList: true, characterData: true, subtree: true });
+refreshTitleOverflow();
 const columnTitle = createRollingText($("#column-name"), {
   ...textOptions,
   text: $("#column-name").textContent ?? "",
@@ -332,10 +377,6 @@ function configureAudio() {
   audio.configure({ ...prefs, music: prefs.music && !musicSuppressed });
 }
 configureAudio();
-const reviewEntry =
-  reviewParams.has("scene") ||
-  reviewParams.has("time") ||
-  reviewParams.get("review") === "1";
 let started = false;
 const loading = $("#loading");
 // The entry screen uses the actual viewport, including portrait phones; the
@@ -384,10 +425,10 @@ function saveAudioPrefs() {
 function superPerformanceEnabled() {
   return isWallpaper
     ? wallpaperHost()?.properties.superperformance?.value === true
-    : prefs.superPerformance;
+    : prefs.displayMode === "smooth";
 }
 function effectiveRenderQuality() {
-  return superPerformanceEnabled() ? superPerformanceQuality : prefs.rendering;
+  return isWallpaper && superPerformanceEnabled() ? superPerformanceQuality : prefs.rendering;
 }
 function savePrefs() {
   saveAudioPrefs();
@@ -421,7 +462,7 @@ function savePrefs() {
   scene?.setQuality(effectiveRenderQuality());
   viewer?.setQuality(effectiveRenderQuality());
   viewer?.setMotion(prefs.motion);
-  syncQualityUI(prefs.rendering);
+  syncQualityUI(prefs.displayMode);
   updateQualitySummary();
   fileCounter.update({
     animated: motionActive("rollingNumbers") && mode === "archive",
@@ -580,10 +621,17 @@ function setMode(next: Mode) {
       $(".read-file").focus({ preventScroll: true });
   }
   $("#detail-ui").inert = next !== "detail" || Boolean(modal);
-  scene?.setMode(next === "boot" ? "hidden" : next);
+  // Keep the prepared overview behind the original text artwork. Hiding the
+  // scene here would restart its reveal and camera when the text finishes.
+  scene?.setMode(next === "boot"
+    ? (isWallpaper || frozenTime !== null ? "hidden" : "archive")
+    : next);
+  if (previousMode === "boot" && next === "archive" && !isWallpaper && frozenTime === null && !preparingOpening) {
+    if (scene?.playEntryWave(timelineNow())) interact(2800);
+  }
   if (next !== "boot") {
-    bootSequence.reset();
-    $(".file-title").firstChild!.textContent = "FILE NUMBER: ";
+    bootSequence?.reset();
+    $(".file-title").firstChild!.textContent = "";
     $("#stage").dataset.boot = "done";
   }
   if (next === "detail" && previousMode !== "detail") {
@@ -596,55 +644,98 @@ function setMode(next: Mode) {
     }
   }
 }
+function workspaceFiles(view: ArchiveWorkspace = archiveWorkspace) { return columnFiles(workspaceLane(view)); }
+function preferredWorkspaceIndex(view: ArchiveWorkspace, projectId?: string) {
+  const files = workspaceFiles(view);
+  const id = projectId || workspaceMemory.get(view);
+  return files.find(index => records[index].id === id) ?? files[0] ?? -1;
+}
+function rememberWorkspace(view: ArchiveWorkspace) {
+  archiveWorkspace = view;
+  try { localStorage.setItem('guangxuan-archive-workspace', view); } catch { /* Optional preference. */ }
+}
 function select(index: number, navigation?: ArchiveNavigation) {
   if (!Number.isInteger(index) || !records[index]) return;
+  if (records[selected]) workspaceMemory.set(workspaceForKind(records[selected].kind), records[selected].id);
+  rememberWorkspace(workspaceForKind(records[index].kind));
   selected = index; columnMemory[fileLocation(selected).lane] = selected;
+  workspaceMemory.set(archiveWorkspace, records[index].id);
   if (mode === "detail") setMode("archive");
   detailDirty = false; activeTab = "overview";
   scene?.select(selected, navigation); updateSelection(navigation); interact(); publishHomeState();
   const columnMove = navigation && "axis" in navigation && navigation.axis === "lane";
   audio.play(columnMove ? "column" : "tick", columnMove ? navigation.direction * 0.45 : 0);
 }
-function stepFile(direction: number) {
-  if (!records.length) return;
-  const files = columnFiles(fileLocation(selected).lane);
-  if (files.length < 2) return;
-  select(files[(files.indexOf(selected) + direction + files.length) % files.length], { axis: "row", direction });
+async function stepFile(direction: number) {
+  const files = workspaceFiles();
+  if (files.length < 2 || archiveNavigationBusy) return;
+  archiveNavigationBusy = true;
+  try {
+    if (detailDirty) await saveProjectDetails();
+    const currentFiles = workspaceFiles();
+    if (!currentFiles.length) return;
+    const current = Math.max(0, currentFiles.indexOf(selected));
+    select(currentFiles[(current + direction + currentFiles.length) % currentFiles.length], { axis: "row", direction });
+    workspaceMemory.set(archiveWorkspace, records[selected].id);
+  } catch (error) { detailNotice((error as Error).message, true); }
+  finally { archiveNavigationBusy = false; }
 }
-function stepColumn(direction: number) {
-  if (!records.length) return;
-  const lanes = archiveColumns.map((_, lane) => lane).filter(lane => columnFiles(lane).length);
-  const current = lanes.indexOf(fileLocation(selected).lane);
-  const lane = lanes[(current + direction + lanes.length) % lanes.length];
-  const files = columnFiles(lane);
-  select(files.includes(columnMemory[lane]) ? columnMemory[lane] : files[0], { axis: "lane", direction });
+function stepColumn(direction: number) { void switchArchiveWorkspace(nextWorkspace(archiveWorkspace, direction)); }
+async function switchArchiveWorkspace(view: ArchiveWorkspace, preferredId?: string) {
+  if (archiveNavigationBusy) return false;
+  if (view === archiveWorkspace && !preferredId) return true;
+  archiveNavigationBusy = true;
+  try {
+    if (detailDirty) await saveProjectDetails();
+    if (records[selected]) workspaceMemory.set(archiveWorkspace, records[selected].id);
+    const direction = Math.sign(workspaceLane(view) - workspaceLane(archiveWorkspace)) || 1;
+    if (mode === 'detail') setMode('archive');
+    rememberWorkspace(view);
+    const index = preferredWorkspaceIndex(view, preferredId);
+    if (index >= 0) select(index, { axis: 'lane', direction });
+    else {
+      selected = -1;
+      scene?.focusWorkspace(workspaceLane(view));
+      updateSelection({ axis: 'lane', direction });
+      audio.play('column', direction * .45); interact(); publishHomeState();
+    }
+    return true;
+  } catch (error) { detailNotice((error as Error).message, true); return false; }
+  finally { archiveNavigationBusy = false; }
 }
 function updateSelection(navigation?: ArchiveNavigation) {
-  const r = records[selected];
-  const stage = $("#stage"); stage.dataset.empty = String(!records.length); stage.dataset.projectsReady = String(projectsReady);
-  $("#project-empty-title").textContent = projectsReady ? "还没有项目" : "正在读取项目";
+  const files = workspaceFiles();
+  const r = files.includes(selected) ? records[selected] : undefined;
+  const stage = $("#stage"); stage.dataset.empty = String(!files.length); stage.dataset.projectsReady = String(projectsReady);
+  stage.dataset.workspace = archiveWorkspace;
+  stage.dataset.workspaceLane = String(workspaceLane(archiveWorkspace));
+  const workspaceIndex = archiveWorkspaces.findIndex(item => item.view === archiveWorkspace);
+  const activeWorkspace = archiveWorkspaces[workspaceIndex];
+  document.querySelectorAll<HTMLButtonElement>('[data-workspace]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.workspace === archiveWorkspace)));
+  columnCounter.update({ value: workspaceIndex + 1, animated: renderActive && motionActive('rollingNumbers') && mode === 'archive' });
+  columnTitle.update({ text: activeWorkspace.label, animated: renderActive && motionActive('rollingText') && mode === 'archive' });
+  for (const action of ['column-prev', 'column-next']) $<HTMLButtonElement>('[data-action="' + action + '"]').disabled = false;
+  $("#project-empty-title").textContent = projectsReady ? `还没有${activeWorkspace.label}项目` : "正在读取项目";
   if (!r) {
     selectionTitle.update({ text: "项目档案", animated: false });
+    $(".file-title").title = "";
+    $(".file-title").setAttribute("aria-label", "打开项目信息");
     clearanceTitle.update({ text: "", animated: false }); categoryTitle.update({ text: "", animated: false });
     selectedCode.update({ value: 0, animated: false }); fileCounter.update({ value: 0, animated: false });
     $(".count-total").textContent = "00"; $("#file-ticks").replaceChildren(); fileTicks = [];
-    for (const action of ["prev", "next", "column-prev", "column-next", "open"]) document.querySelectorAll<HTMLButtonElement>('[data-action="' + action + '"]').forEach(button => { button.disabled = true; });
+    for (const action of ["prev", "next", "open"]) document.querySelectorAll<HTMLButtonElement>('[data-action="' + action + '"]').forEach(button => { button.disabled = true; });
     return;
   }
-  const { lane } = fileLocation(selected), files = columnFiles(lane);
   const animated = renderActive && motionActive("rollingText") && mode === "archive";
-  selectionTitle.update({ text: r.title, animated }); clearanceTitle.update({ text: r.category, animated }); categoryTitle.update({ text: "项目档案", animated });
+  selectionTitle.update({ text: r.title, animated }); clearanceTitle.update({ text: r.category, animated }); categoryTitle.update({ text: activeWorkspace.label, animated });
+  $(".file-title").title = r.title;
+  $(".file-title").setAttribute("aria-label", `打开${r.title}的项目信息`);
   const direction = navigation && "axis" in navigation ? navigation.direction > 0 ? "up" : "down" : "auto";
   selectedCode.update({ value: selected + 1, animated: renderActive && motionActive("rollingNumbers") && mode === "archive", direction });
   fileCounter.update({ value: files.indexOf(selected) + 1, animated: renderActive && motionActive("rollingNumbers") && mode === "archive", direction: navigation && "axis" in navigation && navigation.axis === "row" ? direction : "auto" });
   $(".count-total").textContent = String(files.length).padStart(2, "0");
-  columnCounter.update({ value: lane + 1, animated: renderActive && motionActive("rollingNumbers") && mode === "archive", direction: navigation && "axis" in navigation && navigation.axis === "lane" ? direction : "auto" });
-  columnTitle.update({ text: archiveColumns[lane], animated });
   $<HTMLButtonElement>('[data-action="prev"]').disabled = files.length < 2;
   $<HTMLButtonElement>('[data-action="next"]').disabled = files.length < 2;
-  const activeColumns = archiveColumns.filter((_, index) => columnFiles(index).length).length;
-  $<HTMLButtonElement>('[data-action="column-prev"]').disabled = activeColumns < 2;
-  $<HTMLButtonElement>('[data-action="column-next"]').disabled = activeColumns < 2;
   document.querySelectorAll<HTMLButtonElement>('[data-action="open"]').forEach(button => { button.disabled = false; });
   $(".read-file").firstChild!.textContent = "项目信息 ";
   const offset = Math.max(0, files.indexOf(selected) - 4);
@@ -657,15 +748,44 @@ function replayBoot(forcePreview = false) {
   if (!ready) return;
   closeModal(() => replayBootAfterModal(forcePreview));
 }
-function replayBootAfterModal(forcePreview: boolean) {
-  bootStart = timelineNow() - 1.76;
+async function replayBootAfterModal(forcePreview: boolean) {
+  if (preparingOpening) return;
+  try { await prepareBootSequence(); }
+  catch { notify("开场暂时未能载入，请重试。"); return; }
+  $("#stage").dataset.opening = "cinematic";
   frozenTime = null;
   lastStep = "";
   setMode(!motionActive("boot") && !forcePreview ? "archive" : "boot");
-  audio.restartBoot();
-  selected = records.length ? Math.max(0, selected) : -1;
-  scene?.select(selected);
+  selected = preferredWorkspaceIndex(archiveWorkspace, records[selected]?.id);
+  if (selected >= 0) scene?.select(selected);
+  else scene?.focusWorkspace(workspaceLane(archiveWorkspace));
   updateSelection();
+  if (scene && !isWallpaper && mode === "boot") {
+    // Replaying from project details must also return the hidden camera to
+    // the overview before the text uncovers it. Pause the timeline until ready.
+    preparingOpening = true;
+    const stage = $("#stage");
+    stage.inert = true;
+    $(".mobile-entry").inert = true;
+    const initial = bootSequence?.update(1.76);
+    stage.dataset.boot = lastStep = initial?.step ?? "access";
+    openingPreparation = scene.prepareFirstFrame(timelineNow());
+    try { await openingPreparation; }
+    catch (error) {
+      console.error(error);
+      setMode("archive");
+      notify("开场暂时未能载入，请重试。");
+      return;
+    } finally {
+      stage.inert = false;
+      $(".mobile-entry").inert = false;
+      preparingOpening = false;
+      openingPreparation = undefined;
+      scheduleFrame();
+    }
+  }
+  bootStart = timelineNow() - 1.76;
+  audio.restartBoot();
   if (!forcePreview) audio.play("ui-tick");
 }
 function openFile() {
@@ -684,8 +804,8 @@ function toggleSaved() {
   const button = $<HTMLButtonElement>('[data-action="bookmark"]');
   const added = saved.has(id);
   button.firstChild!.textContent = added
-    ? "− REMOVE FROM SAVED"
-    : "＋ SAVE ARCHIVE";
+    ? "− "
+    : "＋ ";
   button.querySelector("span")!.textContent = added ? "已收藏" : "收藏档案";
   button.setAttribute("aria-pressed", String(added));
   bookmarkFeedback?.cancel();
@@ -700,11 +820,34 @@ function toggleSaved() {
 function renderDetail(clear = false) {
   tabTransition.cancel();
   const record = records[selected]; if (!record) return;
-  $("#object-id").textContent = "PROJECT " + String(selected + 1).padStart(3, "0");
+  $("#object-id").textContent = "";
   $("#detail-content").innerHTML = projectDetailsMarkup(record, selected + 1);
   $("#detail-content").setAttribute("tabindex", "-1");
   const form = $<HTMLFormElement>("#project-details-form");
-  form.addEventListener("input", () => { detailDirty = true; updateDetailButtons(); });
+  paintCoverPicker(form, record, selected);
+  scene?.previewProjectCover(record.id, readProjectCover(form, record.cover), readProjectCoverAssetId(form));
+  form.addEventListener("input", event => {
+    detailDirty = true; updateDetailButtons();
+    if ((event.target as HTMLInputElement).name === "cover") {
+      scene?.previewProjectCover(record.id, readProjectCover(form, record.cover), readProjectCoverAssetId(form));
+      detailNotice("预览封面，保存后生效");
+    }
+  });
+  form.querySelector<HTMLInputElement>('input[name="coverImage"]')?.addEventListener("change", event => {
+    const input = event.target as HTMLInputElement, file = input.files?.[0]; input.value = "";
+    if (!file) return;
+    pendingCoverUpload?.controller.abort();
+    const upload = { projectId: record.id, controller: new AbortController() }; pendingCoverUpload = upload;
+    updateDetailButtons(); detailNotice("正在处理封面图片…");
+    void uploadProjectCover(file, upload.controller.signal).then(assetId => {
+      const currentForm = document.querySelector<HTMLFormElement>("#project-details-form");
+      if (upload.controller.signal.aborted || !currentForm || mode !== "detail" || records[selected]?.id !== record.id) return;
+      restoreProjectCover(currentForm, "custom", assetId); detailDirty = true;
+      scene?.previewProjectCover(record.id, "custom", assetId);
+      detailNotice("图片已上传，保存后生效");
+    }).catch(error => { if (!upload.controller.signal.aborted && mode === "detail" && records[selected]?.id === record.id) detailNotice(error.message || "封面上传失败，原封面已保留。", true); })
+      .finally(() => { if (pendingCoverUpload === upload) pendingCoverUpload = null; updateDetailButtons(); });
+  });
   form.addEventListener("submit", event => { event.preventDefault(); void saveProjectDetails().catch(error => detailNotice(error.message, true)); });
   documentDecryption.reset($("#detail-content"), clear || !motionActive("documentReveal") || !scene || scene.decryptionFrame.phase === "clear");
   updateDetailButtons();
@@ -718,21 +861,25 @@ function updateDetailButtons() {
   const save = document.querySelector<HTMLButtonElement>("#save-project-details");
   const edit = document.querySelector<HTMLButtonElement>("#edit-project");
   const saving = Boolean(record && pendingSave?.projectId === record.id);
-  if (save) { save.disabled = !detailDirty || saving; save.textContent = saving ? "正在保存…" : "保存信息"; }
-  if (edit) { const preparing = editorLoadingId === record?.id; edit.disabled = saving || preparing; edit.innerHTML = preparing ? "正在准备编辑器…" : (detailDirty ? "保存并进入编辑" : "进入编辑") + "<span>→</span>"; }
+  const uploading = Boolean(record && pendingCoverUpload?.projectId === record.id);
+  if (save) { save.disabled = !detailDirty || saving || uploading; save.textContent = saving ? "正在保存…" : uploading ? "正在处理图片…" : "保存信息"; }
+  if (edit) { const preparing = editorLoadingId === record?.id; edit.disabled = saving || preparing || uploading; edit.innerHTML = preparing ? "正在准备编辑器…" : (detailDirty ? "保存并进入编辑" : "进入编辑") + "<span>→</span>"; }
 }
 function saveProjectDetails(): Promise<ArchiveRecord> {
   const record = records[selected];
   if (!record) return Promise.reject(new Error("项目不存在。"));
-  if (pendingSave) return Promise.reject(new Error("正在等待上一次保存结果。"));
+  if (pendingSave) return Promise.reject(new Error("正在保存，请稍候。"));
+  if (pendingCoverUpload?.projectId === record.id) return Promise.reject(new Error("请等待封面图片处理完成。"));
   const title = $<HTMLInputElement>("#project-name").value.trim();
   const description = $<HTMLTextAreaElement>("#project-description").value.trim();
+  const cover = readProjectCover($("#project-details-form"), record.cover);
+  const coverAssetId = readProjectCoverAssetId($("#project-details-form"));
   if (!title || title.length > 120 || description.length > 1000) return Promise.reject(new Error("名称需为1—120字，简介最多1000字。"));
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { if (pendingSave?.requestId === requestId) { pendingSave = null; updateDetailButtons(); reject(new Error("保存尚未确认，请重试。输入内容仍保留。")); } }, 15000);
-    pendingSave = { requestId, projectId: record.id, title, description, resolve, reject, timer };
-    if (!sendPortalMessage({ type: "guangxuan:update-project", projectId: record.id, title, description, requestId })) { clearTimeout(timer); pendingSave = null; reject(new Error("请在光宣工作台中保存项目。")); }
+    pendingSave = { requestId, projectId: record.id, title, description, cover, coverAssetId, resolve, reject, timer };
+    if (!sendPortalMessage({ type: "guangxuan:update-project", projectId: record.id, title, description, cover, coverAssetId, requestId })) { clearTimeout(timer); pendingSave = null; reject(new Error("请在 Gx 中保存项目。")); }
     updateDetailButtons();
   });
 }
@@ -741,22 +888,29 @@ async function editCurrentProject() {
   try {
     if (detailDirty) await saveProjectDetails();
     if (mode !== "detail" || records[selected]?.id !== projectId) return;
-    if (!sendPortalMessage({ type: "guangxuan:edit-project", projectId })) throw new Error("请在光宣工作台中进入编辑。 ");
+    if (!sendPortalMessage({ type: "guangxuan:edit-project", projectId })) throw new Error("请在 Gx 中进入编辑。");
     editorLoadingId = projectId; updateDetailButtons();
   } catch (error) { detailNotice((error as Error).message, true); }
 }
 function receiveProjects(value: unknown, preferredId?: string) {
   if (!Array.isArray(value)) return;
   const previousId = records[selected]?.id; const wasDetail = mode === "detail";
-  const draft = wasDetail && detailDirty ? { title: document.querySelector<HTMLInputElement>("#project-name")?.value, description: document.querySelector<HTMLTextAreaElement>("#project-description")?.value } : null;
+  const draft = wasDetail && detailDirty ? { title: document.querySelector<HTMLInputElement>("#project-name")?.value, description: document.querySelector<HTMLTextAreaElement>("#project-description")?.value, cover: readProjectCover(document, records[selected]?.cover), coverAssetId: readProjectCoverAssetId(document) } : null;
+  allProjectSummaries = value;
+  if (preferredId) {
+    const preferred = value.find(item => item && typeof item === 'object' && item.id === preferredId);
+    if (preferred) rememberWorkspace(workspaceForKind(preferred.kind));
+  }
   setProjects(value);
-  const id = preferredId && records.some(record => record.id === preferredId) ? preferredId : previousId;
-  selected = records.findIndex(record => record.id === id); if (selected < 0 && records.length) selected = 0;
+  selected = preferredWorkspaceIndex(archiveWorkspace, preferredId || previousId);
+  if (selected >= 0) workspaceMemory.set(archiveWorkspace, records[selected].id);
   columnMemory = archiveColumns.map((_, lane) => columnFiles(lane)[0] ?? -1);
-  scene?.syncProjects(selected); updateSelection(); interact();
+  scene?.syncProjects(selected);
+  if (selected < 0) scene?.focusWorkspace(workspaceLane(archiveWorkspace));
+  updateSelection(); interact();
   if (wasDetail) {
     if (!records[selected] || records[selected].id !== previousId) { detailDirty = false; setMode("archive"); }
-    else { renderDetail(true); if (draft) { $<HTMLInputElement>("#project-name").value = draft.title || ""; $<HTMLTextAreaElement>("#project-description").value = draft.description || ""; detailDirty = true; updateDetailButtons(); } }
+    else { renderDetail(true); if (draft) { $<HTMLInputElement>("#project-name").value = draft.title || ""; $<HTMLTextAreaElement>("#project-description").value = draft.description || ""; restoreProjectCover($("#project-details-form"), draft.cover, draft.coverAssetId); scene?.previewProjectCover(records[selected].id, draft.cover, draft.coverAssetId); detailDirty = true; updateDetailButtons(); } }
   }
   if (modal && modal !== "settings") renderResults();
   publishHomeState();
@@ -766,18 +920,30 @@ window.addEventListener("message", event => {
   const message = event.data;
   if (message.type === "guangxuan:projects") receiveProjects(message.projects, typeof message.selectedId === "string" ? message.selectedId : undefined);
   else if (message.type === "guangxuan:visibility" && typeof message.visible === "boolean") { requestedVisible = message.visible; if (message.visible) { editorLoadingId = null; updateDetailButtons(); } syncRenderVisibility(); }
-  else if (message.type === "guangxuan:select-project" && typeof message.projectId === "string") { const index = records.findIndex(record => record.id === message.projectId); if (index >= 0) { if (index !== selected || mode !== "detail") select(index); if (message.detail === true) openFile(); } }
+  else if (message.type === "guangxuan:select-project" && typeof message.projectId === "string") {
+    const target = allProjectSummaries.find(value => value && typeof value === 'object' && (value as Record<string, unknown>).id === message.projectId) as Record<string, unknown> | undefined;
+    if (!target) return;
+    void (async () => {
+      await openingPreparation?.catch(() => {});
+      const workspace = workspaceForKind(target.kind);
+      if (workspace !== archiveWorkspace && !await switchArchiveWorkspace(workspace, message.projectId)) return;
+      const index = records.findIndex(record => record.id === message.projectId);
+      if (index >= 0) { if (index !== selected || mode !== 'detail') select(index); if (message.detail === true) openFile(); }
+    })();
+  }
   else if (message.type === "guangxuan:editor-status" && typeof message.projectId === "string") { editorLoadingId = message.loading ? message.projectId : null; if (message.error && records[selected]?.id === message.projectId) detailNotice(String(message.error).slice(0, 1000), true); updateDetailButtons(); }
   else if (message.type === "guangxuan:project-updated" && pendingSave && message.requestId === pendingSave.requestId) {
     const pending = pendingSave; pendingSave = null; clearTimeout(pending.timer);
     if (message.error) { pending.reject(new Error(String(message.error).slice(0, 1000))); updateDetailButtons(); return; }
-    const updated = mergeProject(message.project && message.project.id === pending.projectId ? message.project : { id: pending.projectId, title: pending.title, description: pending.description });
+    const updated = mergeProject(message.project && message.project.id === pending.projectId ? message.project : { id: pending.projectId, title: pending.title, description: pending.description, cover: pending.cover, coverAssetId: pending.coverAssetId });
     if (!updated) { pending.reject(new Error("项目已不可用，请刷新档案。")); updateDetailButtons(); return; }
+    allProjectSummaries = allProjectSummaries.map(value => value && typeof value === 'object' && (value as Record<string, unknown>).id === updated.id ? { ...value, ...updated } : value);
     if (records[selected]?.id === updated.id) {
       const name = document.querySelector<HTMLInputElement>("#project-name"), description = document.querySelector<HTMLTextAreaElement>("#project-description");
-      detailDirty = Boolean(name && (name.value.trim() !== pending.title || description?.value.trim() !== pending.description));
+      detailDirty = Boolean(name && (name.value.trim() !== pending.title || description?.value.trim() !== pending.description || readProjectCover(document, updated.cover) !== pending.cover || readProjectCoverAssetId(document) !== pending.coverAssetId));
       if (!detailDirty && mode === "detail") renderDetail(true);
-      detailNotice("已保存"); scene?.syncProjects(selected); updateSelection();
+      detailNotice(detailDirty ? "已保存上一版，当前修改尚未保存" : "已保存"); scene?.syncProjects(selected); updateSelection();
+      if (detailDirty && mode === "detail") scene?.previewProjectCover(updated.id, readProjectCover(document, updated.cover), readProjectCoverAssetId(document));
     }
     pending.resolve(updated); updateDetailButtons();
   }
@@ -878,7 +1044,7 @@ function renderModal() {
   if (!modal) return;
   modalTransition?.dispose();
   $("#modal-root").innerHTML =
-    `<div class="modal-backdrop"><section class="terminal-modal ${modal === "settings" ? "settings-modal" : ""}" role="dialog" aria-modal="true" aria-label="${modal === "settings" ? "系统设置" : modal === "saved" ? "收藏档案" : "档案检索"}"><div class="modal-top"><span>GUANGXUAN / ${modal === "settings" ? "SYSTEM PREFERENCES" : "ARCHIVE DIRECTORY"}</span><button data-action="close-modal" aria-label="关闭窗口">CLOSE <span>×</span></button></div>${modal === "settings" ? settingsMarkup() : `<h2>${modal === "saved" ? "已收藏" : "项目索引"}<small>${modal === "saved" ? "收藏档案" : "项目索引"}</small></h2><div class="search-field"><span>⌕</span><input id="archive-search" type="search" autocomplete="off" placeholder="搜索项目" aria-label="检索档案"/><span class="key">ESC</span></div><div class="category-filters">${categories.map((c, i) => `<button data-filter="${escapeHtml(c)}" class="${i === 0 ? "active" : ""}">${escapeHtml(c)}</button>`).join("")}</div><div class="result-header"><span>FILE / 档案</span><span>MODULE / 模块</span><span>ACCESS</span></div><div id="search-results" class="search-results"></div><div class="modal-bottom"><span id="result-count"></span><span>CREATIVE WORKSPACE <i>●</i> CONNECTED</span></div>`}</section></div>`;
+    `<div class="modal-backdrop"><section class="terminal-modal ${modal === "settings" ? "settings-modal" : ""}" role="dialog" aria-modal="true" aria-label="${modal === "settings" ? "系统设置" : modal === "saved" ? "收藏档案" : "档案检索"}"><div class="modal-top"><span aria-hidden="true"></span><button data-action="close-modal" aria-label="关闭窗口">关闭 <span>×</span></button></div>${modal === "settings" ? settingsMarkup() : `<h2>${modal === "saved" ? "已收藏" : "项目索引"}</h2><div class="search-field"><span>⌕</span><input id="archive-search" type="search" autocomplete="off" placeholder="搜索项目" aria-label="检索档案"/><span class="key">ESC</span></div><div class="category-filters">${categories.map((c, i) => `<button data-filter="${escapeHtml(c)}" class="${i === 0 ? "active" : ""}">${escapeHtml(c)}</button>`).join("")}</div><div class="result-header"><span>项目</span><span>类型</span><span>操作</span></div><div id="search-results" class="search-results"></div><div class="modal-bottom"><span id="result-count"></span></div>`}</section></div>`;
   const backdrop = $(".modal-backdrop");
   backdrop.hidden = true;
   modalTransition = new SurfaceTransition(backdrop, $(".terminal-modal"));
@@ -915,25 +1081,15 @@ function renderResults() {
     ? results
         .map(
           ({ r, i }) =>
-            `<button class="result-row" data-result="${i}"><span class="result-name"><b>${r.id}</b><span>${escapeHtml(r.title)}<small>${escapeHtml(r.en)}</small></span>${saved.has(r.id) ? "<i>＋</i>" : ""}</span><span>${escapeHtml(r.department)}</span><span>${r.status === "planned" ? "规划中" : "进入"} <i>↗</i></span></button>`,
+            `<button class="result-row" data-result="${i}"><span class="result-name"><span>${escapeHtml(r.title)}</span>${saved.has(r.id) ? '<i aria-label="已收藏">＋</i>' : ""}</span><span>${escapeHtml(r.department)}</span><span>${r.status === "planned" ? "规划中" : "进入"} <i>↗</i></span></button>`,
         )
         .join("")
-    : `<div class="empty-results"><span>∅</span><strong>${modal === "saved" && !searchQuery ? "尚无收藏档案" : "没有匹配的档案"}</strong><p>${modal === "saved" && !searchQuery ? "读取档案时，选择 SAVE ARCHIVE 将其保存在此处。" : "尝试其他名称、档案编号，或切换科室分类。"}</p><button data-action="reset-search">${modal === "saved" ? "查看全部档案 →" : "重置检索 →"}</button></div>`;
+    : `<div class="empty-results"><span>∅</span><strong>${modal === "saved" && !searchQuery ? "暂无收藏" : "没有匹配的项目"}</strong><button data-action="reset-search">${modal === "saved" ? "查看全部项目 →" : "重置搜索 →"}</button></div>`;
   $("#result-count").textContent =
-    `${String(results.length).padStart(2, "0")} RECORDS FOUND`;
+    `共 ${results.length} 个项目`;
 }
 function updateQualitySummary() {
-  const summary = document.querySelector("#quality-summary");
-  if (!summary) return;
-  if (!scene) {
-    summary.textContent = "3D 已关闭 · 三维模型与渲染资源已释放";
-    return;
-  }
-  const canvas = scene.renderer.domElement;
-  const metrics = JSON.parse(
-    canvas.parentElement?.dataset.renderQuality ?? "{}",
-  );
-  summary.textContent = `${superPerformanceEnabled() ? "超级性能模式已启用 · 画质设置暂被覆盖，关闭后恢复 · " : ""}实际渲染 ${canvas.width} × ${canvas.height} · ${effectiveRenderQuality().antialias === "smaa" ? "SMAA" : "原始抗锯齿"} · 纹理 ${metrics.anisotropy ?? 1}×${metrics.limited ? " · 已达到缓冲上限" : ""}`;
+  syncQualityUI(prefs.displayMode);
 }
 function motionPreferenceNoteMarkup() {
   const preset = prefs.motionPreset;
@@ -941,17 +1097,10 @@ function motionPreferenceNoteMarkup() {
   return `<div id="motion-preference-note" class="motion-preference-note"><p>${motionSummary(prefs.motion)}</p><span>预设：${preset === "full" ? "完整动画" : preset === "reduced" ? "减少动画" : "自定义"} · 选择会保存在本站</span>${allEnabled ? "" : '<button data-action="enable-motion">启用完整动画并重播 ↻</button>'}</div>`;
 }
 function settingsMarkup() {
-  return `<h2>界面设置<small>终端偏好设置</small></h2>${isWallpaper ? '<p class="wallpaper-settings-note">每次启动都会读取 Wallpaper Engine 中的设置。在此修改仅对当前运行生效，无法持久保存；如需保留，请在 Wallpaper Engine 的壁纸属性中调整。</p>' : ""}<div class="settings-list">${themeSettingsMarkup(prefs.colorTheme === "dark")}${!isWallpaper ? `<label><div><strong>SUPER PERFORMANCE</strong><span>降低三维画质和渲染分辨率，保留完整动效；关闭后恢复原画质</span></div><input type="checkbox" data-pref="superPerformance" ${prefs.superPerformance ? "checked" : ""}/><i class="toggle"></i></label>` : ""}${workbench?.settingsMarkup() ?? ""}${audioSettingsMarkup(prefs)}</div>${motionPreferenceNoteMarkup()}${motionSettingsMarkup(prefs.motion, prefs.motionPreset)}${qualityMarkup(prefs.rendering)}<div class="settings-shortcuts">${isWallpaper ? "<span>DESKTOP CONTROLS</span><p>拖动阵列或点击界面按钮浏览档案。桌面模式下，方向键与滚轮可能无法传入壁纸。</p>" : "<span>KEYBOARD CONTROLS</span><p><kbd>←</kbd><kbd>→</kbd> 切列 <kbd>↑</kbd><kbd>↓</kbd> 选档 <kbd>ENTER</kbd> 读取 <kbd>/</kbd> 检索 <kbd>ESC</kbd> 返回</p>"}</div><div class="settings-bottom">${!isWallpaper && document.fullscreenEnabled ? '<button data-action="fullscreen">FULLSCREEN <span>↗</span></button>' : ""}<button data-action="restart">重播启动 <span>↻</span></button></div><div class="modal-bottom"><span>光宣工作台</span></div>`;
+  return `<h2>界面设置</h2>${isWallpaper ? '<p class="wallpaper-settings-note">每次启动都会读取 Wallpaper Engine 中的设置。在此修改仅对当前运行生效，无法持久保存；如需保留，请在 Wallpaper Engine 的壁纸属性中调整。</p>' : ""}<div class="settings-list">${themeSettingsMarkup(prefs.colorTheme === "dark")}${workbench?.settingsMarkup() ?? ""}${audioSettingsMarkup(prefs)}</div>${qualityMarkup(prefs.displayMode)}${motionPreferenceNoteMarkup()}${motionSettingsMarkup(prefs.motion, prefs.motionPreset)}<div class="settings-shortcuts">${isWallpaper ? "<span>桌面操作</span><p>拖动阵列或点击按钮浏览项目。桌面模式可能无法接收方向键与滚轮。</p>" : "<span>快捷键</span><p><kbd>←</kbd><kbd>→</kbd> 功能 <kbd>↑</kbd><kbd>↓</kbd> 项目 <kbd>ENTER</kbd> 打开 <kbd>/</kbd> 搜索 <kbd>ESC</kbd> 返回</p>"}</div><div class="settings-bottom">${!isWallpaper && document.fullscreenEnabled ? '<button data-action="fullscreen">全屏 <span>↗</span></button>' : ""}<button data-action="restart">重播启动 <span>↻</span></button></div>`;
 }
 
 document.addEventListener("input", (e) => {
-  const slider = e.target as HTMLInputElement;
-  if (slider.dataset.quality) {
-    const output = document.querySelector<HTMLOutputElement>(
-      `[data-quality-output="${slider.dataset.quality}"]`,
-    );
-    if (output) output.value = `${slider.value}%`;
-  }
   const volume = e.target as HTMLInputElement;
   if (
     volume.dataset.volume === "musicVolume" ||
@@ -971,31 +1120,13 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("change", (e) => {
   const el = e.target as HTMLInputElement;
-  if (el.id === "quality-preset" && Object.hasOwn(qualityPresets, el.value)) {
-    prefs.qualityExplicit = true;
-    prefs.rendering = { ...qualityPresets[el.value as QualityPreset] };
-    savePrefs();
-  } else if (el.dataset.quality) {
-    prefs.qualityExplicit = true;
-    const key = el.dataset.quality as keyof RenderQuality;
-    prefs.rendering = normalizeQuality({
-      ...prefs.rendering,
-      [key]: key === "antialias" ? el.value : Number(el.value),
-    });
-    savePrefs();
-  }
   if (el.dataset.pref) {
     const key = el.dataset.pref;
-    if (
-      key === "sound" ||
-      key === "music" ||
-      key === "quality" ||
-      key === "superPerformance"
-    )
+    if (key === "sound" || key === "music") {
       prefs[key] = el.checked;
-    if (key === "sound" || key === "music") saveAudioPrefs();
-    else savePrefs();
-    audio.play("confirm");
+      saveAudioPrefs();
+      audio.play("confirm");
+    }
   }
   if (el.dataset.motion) {
     const key = el.dataset.motion as MotionKey;
@@ -1033,6 +1164,7 @@ document.addEventListener("change", (e) => {
   }
 });
 document.addEventListener("click", (e) => {
+  if (preparingOpening) return;
   const themeButton = (e.target as Element).closest<HTMLElement>(
     "[data-color-theme]",
   );
@@ -1046,6 +1178,16 @@ document.addEventListener("click", (e) => {
   if (modalClosing) return;
   const el = (e.target as Element).closest<HTMLElement>("button");
   if (!el) return;
+  const displayMode = el.dataset.performanceMode;
+  if (displayMode === "original" || displayMode === "smooth") {
+    prefs.displayMode = displayMode;
+    prefs.superPerformance = displayMode === "smooth";
+    prefs.rendering = { ...qualityPresets[displayMode === "smooth" ? "performance" : "original"] };
+    savePrefs();
+    interact(2500);
+    audio.play("confirm");
+    return;
+  }
   if (el.dataset.action === "motion-preset") {
     const preset = el.dataset.preset;
     if (preset !== "full" && preset !== "reduced") return;
@@ -1093,6 +1235,7 @@ document.addEventListener("click", (e) => {
     return;
   }
   const action = el.dataset.action;
+  if (action?.startsWith('workspace-') && isArchiveWorkspace(el.dataset.workspace)) { void switchArchiveWorkspace(el.dataset.workspace); return; }
   if (action === "toggle-three") {
     void toggleThree();
     return;
@@ -1109,14 +1252,19 @@ document.addEventListener("click", (e) => {
   if (action === "open") openFile();
   if (action === "projects") { openPortalView("archive"); return; }
   if (action === "connection") { openPortalView("settings"); return; }
+  if (action === "tasks" || action === "restore" || action === "assistant") { openPortalView(action); return; }
+  if (action === "project-tools") { openPortalView("tools"); return; }
   if (action === "edit-project") { void editCurrentProject(); return; }
-  if (action === "new-project") { sendPortalMessage({ type: "guangxuan:new-project" }); return; }
+  if (action === "new-project") { sendPortalMessage({ type: "guangxuan:new-project", kind: archiveWorkspaces.find(item => item.view === archiveWorkspace)!.kind }); return; }
   if (action === "sync-projects") { portalReady(); return; }
-  if (action === "model-viewer" && mode === "detail" && scene) {
+  if (action === "model-viewer" && mode === "detail" && scene) void (async () => {
     const activeScene = scene;
+    const record = records[selected];
     // Safari does not always focus a button when it is tapped. Capture the
     // actual opener so closing the modal reliably restores the right control.
     el.focus({ preventScroll: true });
+    const { ModelViewer } = await import("./model-viewer");
+    if (scene !== activeScene || mode !== "detail" || records[selected]?.id !== record.id) return;
     viewer ??= new ModelViewer(
       $("#stage"),
       () => {
@@ -1129,7 +1277,7 @@ document.addEventListener("click", (e) => {
     viewer.setSuperPerformance(superPerformanceEnabled());
     viewer.setQuality(effectiveRenderQuality());
     viewer.setMotion(prefs.motion);
-    scene.finishDecryption();
+    activeScene.finishDecryption();
     viewer.open(
       records[selected].id,
       records[selected].title,
@@ -1137,7 +1285,7 @@ document.addEventListener("click", (e) => {
       !motionActive("viewerNavigation"),
     );
     audio.play("page-open");
-  }
+  })().catch(() => notify("模型查看器暂时未能打开，请重试。"));
   if (action === "back") {
     setMode("archive");
     audio.play("back");
@@ -1172,6 +1320,7 @@ document.addEventListener("click", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
+  if (preparingOpening) { e.preventDefault(); return; }
   if (!started) return;
   if (viewer?.isOpen) return;
   if (playground?.active && !modal) {
@@ -1196,7 +1345,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable;
+  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target as HTMLElement).isContentEditable;
   if (e.key === "Escape") {
     if (modal) closeModal();
     else if (mode === "detail" || (mode === "boot" && ready)) {
@@ -1229,7 +1378,7 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if (typing || modal || !ready) return;
+  if (typing || modal || !ready || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   if (
     (e.target as HTMLElement).dataset.tab &&
     ["ArrowLeft", "ArrowRight"].includes(e.key)
@@ -1270,7 +1419,7 @@ document.addEventListener("keydown", (e) => {
       ["prev", "next", "column-prev", "column-next"].includes(
         (document.activeElement as HTMLElement)?.dataset.action ?? "",
       ) ||
-      (document.activeElement as HTMLElement)?.dataset.select)
+      (document.activeElement as HTMLElement)?.dataset.select || (document.activeElement as HTMLElement)?.dataset.workspace)
   ) {
     e.preventDefault();
     if (mode === "boot") setMode("archive");
@@ -1283,6 +1432,11 @@ const ease = (t: number) => {
   return t * t * (3 - 2 * t);
 };
 function bootFrame(t: number) {
+  if (!isWallpaper && frozenTime === null && t >= textOpeningEnd) {
+    performance.mark("gx:home:overview-visible");
+    setMode("archive");
+    return undefined;
+  }
   if (isWallpaper && !scene && frozenTime === null && t >= 21.9) {
     setMode("archive");
     return undefined;
@@ -1300,7 +1454,8 @@ function bootFrame(t: number) {
     return undefined;
   }
   audio.updateBoot(t, frozenTime !== null);
-  const motion = bootSequence.update(t);
+  const motion = bootSequence?.update(t);
+  if (!motion) return undefined;
   if (workbench?.enabled && frozenTime === null) {
     const end = openingShowsDetail(
       wallpaperHost()?.properties.openingdetail?.value,
@@ -1327,8 +1482,8 @@ function bootFrame(t: number) {
   }
   $(".file-title").firstChild!.textContent =
     step === "array"
-      ? "SELECTING FILES...".slice(0, Math.max(0, Math.floor((t - 21.94) * 18)))
-      : "FILE NUMBER: ";
+      ? "正在选择项目…".slice(0, Math.max(0, Math.floor((t - 21.94) * 9)))
+      : "";
   $("#stage").style.setProperty(
     "--entry-opacity",
     String(ease((t - 21.9) / 0.13)),
@@ -1359,6 +1514,7 @@ let lastTime = 0,
 function frame(ms: number) {
   frameHandle = null;
   if (!renderActive || !started) return;
+  if (preparingOpening) { scheduleFrame(); return; }
   const targetFps = mode === "boot" || ms < interactionUntil ? 60 : 30;
   $("#three-scene").dataset.targetFps = String(targetFps);
   if (ms - lastFrameAt < 1000 / targetFps - 1) { scheduleFrame(); return; }
@@ -1386,8 +1542,9 @@ function frame(ms: number) {
     motionIsReduced(),
     motionActive("pointerParallax"),
   );
-  // The calibrated 2D opening fully covers the scene until array entry.
-  if (!viewer?.isOpen && (!cinema || cinema.time >= 21.9))
+  // The original text artwork covers the already prepared overview. Its last
+  // frame hands straight to archive mode without selecting a close-up shot.
+  if (!viewer?.isOpen && (!cinema || ((isWallpaper || frozenTime !== null) && cinema.time >= 21.9)))
     scene?.update(time, cinema);
   viewer?.update(time);
   if (threeState === "closing" && scene?.presentationHidden) releaseThree();
@@ -1443,12 +1600,13 @@ function frame(ms: number) {
 function bindScene(scene: ArchiveScene, cell?: { lane: number; row: number }) {
   scene.setTimelineOffset(suspendedSeconds);
   scene.syncProjects(selected);
-  scene.select(selected, cell ? { cell } : undefined);
+  if (records[selected]) scene.select(selected, cell ? { cell } : undefined);
+  else scene.focusWorkspace(workspaceLane(archiveWorkspace));
   scene.onSelect = (i, cell) => {
     if (mode !== "archive" || modal || viewer?.isOpen) return;
     select(i, cell ? { cell } : undefined);
   };
-  scene.onOpen = index => { if (records[index] && mode === "archive" && !modal) openFile(); };
+  scene.onOpen = index => { if (records[index] && mode === "archive" && !modal) { if (index !== selected) select(index); openFile(); } };
   scene.onNavigate = (axis, direction) => {
     if (mode !== "archive" || modal || viewer?.isOpen) return;
     if (axis === "lane") stepColumn(direction);
@@ -1543,6 +1701,7 @@ async function toggleThree() {
   syncThreeButton();
   let next: ArchiveScene | undefined;
   try {
+    const { ArchiveScene } = await import("./scene");
     next = new ArchiveScene($("#three-scene"));
     next.renderer.domElement.style.opacity = "0";
     next.setPresentationVisible(false, true);
@@ -1572,12 +1731,22 @@ async function toggleThree() {
 async function start() {
   try {
     if (isWallpaper) await window.rhineWallpaperPropertiesReady;
+    // Let the loading surface paint before WebGL setup, and load the original
+    // text opening alongside the scene rather than serially after it.
+    await new Promise<void>(resolve => requestAnimationFrame(() => { setTimeout(resolve, 0); }));
+    const openingReady = prepareBootSequence();
+    // Parent summaries can arrive while the wave model is loading.
+    portalReady();
     if (
       !isWallpaper ||
       wallpaperHost()?.properties.load3donstartup?.value !== false
     ) {
+      performance.mark("gx:home:scene-start");
+      const { ArchiveScene } = await import("./scene");
       scene = new ArchiveScene($("#three-scene"));
       scene.setTheme(prefs.colorTheme === "dark", true);
+      scene.setSuperPerformance(superPerformanceEnabled());
+      scene.setQuality(effectiveRenderQuality());
       scene.setArchiveCoverage(
         wallpaperHost()?.properties.archivecoverage?.value === "extra",
       );
@@ -1587,7 +1756,7 @@ async function start() {
     }
     await Promise.all([
       scene?.load(),
-      loadBootWebfonts(),
+      openingReady,
       // With unicode-range faces, preload the opening's actual characters,
       // not every font shard. Other archive text loads on demand.
       document.fonts.load(
@@ -1596,7 +1765,7 @@ async function start() {
       ),
       document.fonts.load(
         "400 20px MiSans",
-        "身份信息确认请求已接收开始处理权限验证通过欢迎访问光宣工作台内部资料档案编号保密级别商业区选择档案：0123456789 GUANGXUAN",
+        "身份信息确认请求已接收开始处理权限验证通过欢迎访问Gx内部资料档案编号保密级别商业区选择档案：0123456789 Gx",
       ),
       document.fonts.load(
         "600 20px MiSans",
@@ -1604,15 +1773,25 @@ async function start() {
       ),
       document.fonts.load(
         "700 20px MiSans",
-        "GUANGXUAN WELCOME TO CREATIVE WORKSPACE",
+        "Gx WELCOME TO CREATIVE WORKSPACE",
       ),
     ]);
     if (scene) bindScene(scene);
     savePrefs();
+    selected = preferredWorkspaceIndex(archiveWorkspace, records[selected]?.id);
+    if (selected >= 0) select(selected);
+    else { scene?.focusWorkspace(workspaceLane(archiveWorkspace)); updateSelection(); }
+    if (scene && !isWallpaper && frozenTime === null) {
+      performance.mark("gx:home:first-frame-start");
+      openingPreparation = scene.prepareFirstFrame(timelineNow());
+      try { await openingPreparation; }
+      finally { openingPreparation = undefined; }
+      performance.mark("gx:home:first-frame-ready");
+    }
+    performance.mark("gx:home:scene-ready");
     ready = true;
+    performance.mark("gx:home:ready");
     portalReady();
-    if (records.length) select(Math.max(0, selected));
-    else updateSelection();
     if (entry) entry.ready();
     else {
       if (isWallpaper) {
@@ -1825,8 +2004,8 @@ if (isWallpaper) {
 void start();
 enableGamepad();
 const ARCHIVE_HINT: Record<"keyboard" | "gamepad", string> = {
-  keyboard: `<kbd>←</kbd> <kbd>→</kbd> 切换 <span>／</span> <kbd>ENTER</kbd> 进入`,
-  gamepad: `<kbd>LS</kbd> <kbd>DP</kbd> 切换 <span>／</span> <kbd>A</kbd> 进入`,
+  keyboard: `<kbd>←</kbd> <kbd>→</kbd> 切换工作区 <span>／</span> <kbd>↑</kbd> <kbd>↓</kbd> 同类项目 <span>／</span> <kbd>ENTER</kbd> 信息`,
+  gamepad: `<kbd>← →</kbd> 波浪 <span>／</span> <kbd>↑ ↓</kbd> 同类项目 <span>／</span> <kbd>A</kbd> 信息`,
 };
 onInputDevice((device) => {
   const hint = document.querySelector(".archive-hint");
@@ -1851,7 +2030,9 @@ Object.assign(window, {
       replayBoot(true);
       return true;
     },
-    seek: (t: number) => {
+    seek: async (t: number) => {
+      await prepareBootSequence();
+      $("#stage").dataset.opening = "cinematic";
       setMode("boot");
       bootStart = performance.now() / 1000 - t;
       lastStep = "";
@@ -1863,6 +2044,7 @@ Object.assign(window, {
       ...scene?.getStats(),
       threeState,
       fps: Math.round(fps),
+      displayMode: prefs.displayMode,
       mode,
       ready,
       startup: started ? "started" : (entry?.phase ?? "loading"),
@@ -1870,7 +2052,7 @@ Object.assign(window, {
       bootTime:
         mode === "boot"
           ? started
-            ? (frozenTime ?? performance.now() / 1000 - bootStart) + 5
+            ? (frozenTime ?? portalBootTime(timelineNow() - bootStart)) + 5
             : 6.76
           : null,
       selected: records[selected]?.id ?? null,

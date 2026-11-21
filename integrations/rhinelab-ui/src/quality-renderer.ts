@@ -5,6 +5,8 @@ import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { renderDimensions, type RenderQuality } from "./render-quality";
 
+const composerSizes = new WeakMap<EffectComposer, { width: number; height: number }>();
+
 export function applyTextureQuality(
   root: THREE.Object3D,
   renderer: THREE.WebGLRenderer,
@@ -51,10 +53,20 @@ export function resizeQuality(
     renderer.capabilities.maxTextureSize,
     superPerformance ? 921_600 : 8_294_400,
   );
-  renderer.setPixelRatio(dimensions.ratio);
-  renderer.setSize(width, height);
-  composer.setPixelRatio(dimensions.ratio);
-  composer.setSize(width, height);
+  // Keep the GPU pipeline in physical pixels and let CSS own the stage units.
+  // For example, 1280x1516 at .594 stage scale and 760x900 at scale 1 both
+  // need the same 760x900 image. Updating the renderer's logical size/ratio
+  // separately would clear the prepared canvas twice at that layout cut.
+  const current = renderer.getSize(new THREE.Vector2());
+  if (renderer.getPixelRatio() !== 1 || current.x !== dimensions.width || current.y !== dimensions.height)
+    renderer.setDrawingBufferSize(dimensions.width, dimensions.height, 1);
+  renderer.domElement.style.width = "100%";
+  renderer.domElement.style.height = "100%";
+  const previous = composerSizes.get(composer);
+  if (!previous) composer.setPixelRatio(1);
+  if (!previous || previous.width !== dimensions.width || previous.height !== dimensions.height)
+    composer.setSize(dimensions.width, dimensions.height);
+  composerSizes.set(composer, { width: dimensions.width, height: dimensions.height });
   renderer.transmissionResolutionScale = quality.transmission;
   host.dataset.renderQuality = JSON.stringify({
     ...dimensions,

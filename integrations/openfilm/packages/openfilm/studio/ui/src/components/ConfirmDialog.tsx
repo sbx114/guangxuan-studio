@@ -2,6 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/i18n';
 import { Card, CardActions, CardButton } from './Card';
+import { useDialogBoundary } from './use-dialog-boundary';
 
 /** A centered confirmation, in the card shell. */
 export function ConfirmDialog({
@@ -32,35 +33,9 @@ export function ConfirmDialog({
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement>(null);
   const confirmButtonRef = React.useRef<HTMLButtonElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    /* focus starts on the confirm button, so Enter confirms: the person already chose once. It is safe because
-       focus must be inside the dialog; Esc, or Tab to Cancel and Enter, backs out. */
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    confirmButtonRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onCancel();
-        return;
-      }
-      if (e.key === 'Enter') {
-        const target = e.target as Node | null;
-        if (target && dialogRef.current?.contains(target)) {
-          // Enter on another button (Cancel, the second answer) presses that button
-          if (target instanceof HTMLButtonElement && target !== confirmButtonRef.current) return;
-          e.preventDefault();
-          onConfirm();
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      previouslyFocused?.focus?.();
-    };
-  }, [open, onCancel, onConfirm]);
+  const confirm = React.useRef(onConfirm);
+  confirm.current = onConfirm;
+  const boundary = useDialogBoundary({ open, panel: dialogRef, initialFocus: confirmButtonRef, onClose: onCancel });
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -72,8 +47,19 @@ export function ConfirmDialog({
     >
       <div
         ref={dialogRef}
+        tabIndex={-1}
         className="w-full max-w-[420px]"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          boundary(e);
+          if (e.defaultPrevented || e.nativeEvent.isComposing || e.key !== 'Enter') return;
+          // Other buttons keep their own native Enter action (Cancel or the
+          // alternate answer); the initially focused primary button confirms.
+          const button = e.target instanceof Element ? e.target.closest('button') : null;
+          if (button && button !== confirmButtonRef.current) return;
+          e.preventDefault();
+          confirm.current();
+        }}
         role="dialog"
         aria-modal="true"
         aria-label={title}

@@ -37,7 +37,7 @@ export function bootMotion(appTime: number) {
   let auth = "";
   if (f < 363) {
     auth = typed("WORKSPACE READY", f, 282, 295);
-    if (f >= 320) auth += " : " + typed("GUANGXUAN", f, 321, 339);
+    if (f >= 320) auth += " : " + typed("Gx", f, 321, 339);
   } else if (f < 421) auth = typed("OPENING ARCHIVE", f, 367, 389);
   else {
     auth = typed("PREPARING VIEW", f, 423, 440);
@@ -64,7 +64,7 @@ export function bootMotion(appTime: number) {
     accessOpacity: f >= 170 && f < 227 ? (f === 226 ? 0.25 : 1) : 0,
     logoOpacity: t >= 9.16 && t < 19.48 ? 1 : 0,
     logo: bootLogoTrack(frame),
-    logoLetters: typed("GUANGXUAN", f, 232, 255),
+    logoLetters: typed("Gx", f, 232, 255),
     authOpacity: f >= 281 && f < 487 ? 1 : 0,
     brand: [0, 1, 2].map((line) => brandTrack(frame, line)),
     poweredLetters: typed("", f, 279, 295).length,

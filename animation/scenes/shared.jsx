@@ -1,17 +1,25 @@
 import React from 'react';
 import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
+import { ANIMATION_FONTS, ANIMATION_PACE, ANIMATION_THEMES, animationPalette } from '../styles.mjs';
 
 export const smooth = Easing.bezier(0.18, 0.92, 0.22, 1);
 export const clamp = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' };
-export const themes = {
-  paper: { background: '#e8e5e1', ink: '#080a08', muted: '#656856', line: '#bfc0b5', soft: '#dcdcd1', accent: '#565c46', brass: '#9b8356', opposite: '#efede6', glass: 'rgba(255,255,248,0.35)', glassEdge: '#f7f5ef', shade: '#747363' },
-  dark: { background: '#080a08', ink: '#e8e5e1', muted: '#bec2ac', line: '#454b3b', soft: '#22291c', accent: '#b2bb95', brass: '#bc9b62', opposite: '#10140d', glass: 'rgba(201,211,177,0.05)', glassEdge: '#747d65', shade: '#000000' },
-};
+export const themes = ANIMATION_THEMES;
+export const SceneStyleContext = React.createContext({ brand: null, motion: null, projectFrame: null, startFrame: 0, durationInFrames: 150 });
+const EASINGS = { smooth, linear: Easing.linear, out: Easing.bezier(.16, 1, .3, 1), inOut: Easing.bezier(.65, 0, .35, 1) };
+
+export function useSceneTimelineFrame() {
+  const local = useCurrentFrame(), style = React.useContext(SceneStyleContext);
+  return style.projectFrame === null ? local : style.projectFrame - style.startFrame;
+}
+export function useSceneFrame() { const frame = useSceneTimelineFrame(), style = React.useContext(SceneStyleContext); return frame * (ANIMATION_PACE[style.motion?.pace] || 1); }
+export function useSceneEasing() { const style = React.useContext(SceneStyleContext); return EASINGS[style.motion?.easing] || smooth; }
 
 export function useSceneStyle(theme) {
   const config = useVideoConfig();
+  const style = React.useContext(SceneStyleContext);
   const scale = Math.min(config.width, config.height) / 720;
-  return { ...config, scale, portrait: config.height > config.width, palette: themes[theme] || themes.paper };
+  return { ...config, scale, portrait: config.height > config.width, palette: animationPalette(theme, style.brand), fontFamily: ANIMATION_FONTS[style.brand?.font || 'original'] || ANIMATION_FONTS.original };
 }
 
 export function fittedSize(text, preferred, availableWidth, maxLines = 3, minimum = 28) {
@@ -20,24 +28,42 @@ export function fittedSize(text, preferred, availableWidth, maxLines = 3, minimu
 }
 
 export function Reveal({ children, delay = 0, style = {}, distance = 20 }) {
-  const frame = useCurrentFrame();
-  return <div style={{ ...style, opacity: interpolate(frame, [delay, delay + 18], [0, 1], { ...clamp, easing: smooth }), translate: `0 ${interpolate(frame, [delay, delay + 26], [distance, 0], { ...clamp, easing: smooth })}px` }}>{children}</div>;
+  const frame = useSceneFrame(), motionEasing = useSceneEasing(), settings = React.useContext(SceneStyleContext);
+  if (settings.motion?.reveal && settings.motion.reveal !== 'original') return <EditableReveal type={settings.motion.reveal} delay={delay} style={style} distance={distance}>{children}</EditableReveal>;
+  return <div style={{ ...style, opacity: interpolate(frame, [delay, delay + 18], [0, 1], { ...clamp, easing: motionEasing }), translate: `0 ${interpolate(frame, [delay, delay + 26], [distance, 0], { ...clamp, easing: motionEasing })}px` }}>{children}</div>;
 }
 
 export function MaskReveal({ children, delay = 0, style = {}, color = '#080a08', duration = 26 }) {
-  const frame = useCurrentFrame();
+  const frame = useSceneFrame(), motionEasing = useSceneEasing(), settings = React.useContext(SceneStyleContext);
+  if (settings.motion?.reveal && settings.motion.reveal !== 'original') return <EditableReveal type={settings.motion.reveal} delay={delay} style={style} duration={duration} color={color}>{children}</EditableReveal>;
   const begin = delay + Math.round(duration * 0.28);
-  const reveal = interpolate(frame, [begin, delay + duration], [0, 1], { ...clamp, easing: smooth });
-  const cover = interpolate(frame, [delay, begin], [0, 1], { ...clamp, easing: smooth });
+  const reveal = interpolate(frame, [begin, delay + duration], [0, 1], { ...clamp, easing: motionEasing });
+  const cover = interpolate(frame, [delay, begin], [0, 1], { ...clamp, easing: motionEasing });
   return <div style={{ ...style, position: 'relative', overflow: 'hidden', textWrap: 'balance' }}>
     <div style={{ clipPath: `inset(0 ${(1 - reveal) * 100}% 0 0)`, translate: `0 ${12 * (1 - reveal)}px` }}>{children}</div>
     <div aria-hidden="true" style={{ position: 'absolute', inset: 0, backgroundColor: color, transformOrigin: 'left', scale: `${cover} 1`, translate: `${reveal * 102}% 0` }} />
   </div>;
 }
 
+function EditableReveal({ children, type, delay = 0, duration = 26, distance = 20, color = '#080a08', style = {} }) {
+  const frame = useSceneFrame(), easing = useSceneEasing(), settings = React.useContext(SceneStyleContext);
+  const text = typeof children === 'string' || typeof children === 'number' ? String(children) : null;
+  const characters = React.useMemo(() => text === null ? [] : typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].map(part => part.segment) : [...text], [text]);
+  const typingDuration = Math.max(1, Math.min(Math.max(duration, characters.length * 1.2), settings.durationInFrames * .55 - delay));
+  if (type === 'typewriter' && text !== null) return <div aria-label={text} style={{ ...style, position: 'relative' }}>
+    <span aria-hidden="true" style={{ visibility: 'hidden' }}>{text}</span>
+    <span aria-hidden="true" style={{ position: 'absolute', inset: 0, whiteSpace: 'pre-wrap' }}>{characters.slice(0, Math.floor(interpolate(frame, [delay, delay + typingDuration], [0, characters.length], { ...clamp, easing }))).join('')}</span>
+  </div>;
+  if (type === 'mask') return <div style={{ ...style, position: 'relative', overflow: 'hidden', textWrap: 'balance' }}>
+    <div style={{ clipPath: `inset(0 ${interpolate(frame, [delay + duration * .28, delay + duration], [100, 0], { ...clamp, easing })}% 0 0)`, translate: `0 ${interpolate(frame, [delay + duration * .28, delay + duration], [12, 0], { ...clamp, easing })}px` }}>{children}</div>
+    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, backgroundColor: color, transformOrigin: 'left', scale: `${interpolate(frame, [delay, delay + duration * .28], [0, 1], { ...clamp, easing })} 1`, translate: `${interpolate(frame, [delay + duration * .28, delay + duration], [0, 102], { ...clamp, easing })}% 0` }} />
+  </div>;
+  return <div style={{ ...style, opacity: interpolate(frame, [delay, delay + duration], [0, 1], { ...clamp, easing }), ...(type === 'rise' ? { translate: `0 ${interpolate(frame, [delay, delay + duration], [distance, 0], { ...clamp, easing })}px` } : {}) }}>{children}</div>;
+}
+
 function ArchiveAtmosphere({ palette, portrait }) {
-  const frame = useCurrentFrame();
-  const unfold = interpolate(frame, [0, 48], [0, 1], { ...clamp, easing: smooth });
+  const frame = useSceneFrame(), motionEasing = useSceneEasing();
+  const unfold = interpolate(frame, [0, 48], [0, 1], { ...clamp, easing: motionEasing });
   return <svg aria-hidden="true" viewBox="0 0 700 720" style={{ position: 'absolute', right: portrait ? '-34%' : '-5%', top: portrait ? '7%' : '-5%', width: portrait ? '95%' : '56%', height: '100%', opacity: 0.26, pointerEvents: 'none' }}>
     {[0, 1, 2, 3].map(layer => <g key={layer} style={{ translate: `${(layer - 1.5) * (18 + 9 * unfold)}px ${-layer * 13 * unfold}px` }}>
       <path d="M280 70 555 180 460 650 185 540Z" fill={layer === 3 ? palette.glass : 'none'} stroke={palette.line} strokeWidth="1" />
@@ -49,10 +75,10 @@ function ArchiveAtmosphere({ palette, portrait }) {
 
 export function OpticalArchive({ theme = 'paper', index = 0, mode = 'extract', style = {} }) {
   const { palette } = useSceneStyle(theme);
-  const frame = useCurrentFrame();
-  const pull = interpolate(frame, [2, 44], [0, 1], { ...clamp, easing: smooth });
-  const layers = mode === 'seal' ? interpolate(frame, [4, 42], [1, 0.25], { ...clamp, easing: smooth }) : interpolate(frame, [4, 42], [0.1, 1], { ...clamp, easing: smooth });
-  const ringTurn = interpolate(frame, [12, 58], [-18, 0], { ...clamp, easing: smooth });
+  const frame = useSceneFrame(), motionEasing = useSceneEasing();
+  const pull = interpolate(frame, [2, 44], [0, 1], { ...clamp, easing: motionEasing });
+  const layers = mode === 'seal' ? interpolate(frame, [4, 42], [1, 0.25], { ...clamp, easing: motionEasing }) : interpolate(frame, [4, 42], [0.1, 1], { ...clamp, easing: motionEasing });
+  const ringTurn = interpolate(frame, [12, 58], [-18, 0], { ...clamp, easing: motionEasing });
   const id = `gx-optic-${theme}-${index}-${mode}`;
   return <svg aria-hidden="true" viewBox="0 0 420 470" style={{ display: 'block', width: '100%', height: '100%', overflow: 'visible', ...style }}>
     <defs>
@@ -86,10 +112,10 @@ export function OpticalArchive({ theme = 'paper', index = 0, mode = 'extract', s
 }
 
 export function SceneShell({ children, scene, index, count, theme }) {
-  const { scale, portrait, palette } = useSceneStyle(theme);
-  const frame = useCurrentFrame();
+  const { scale, portrait, palette, fontFamily } = useSceneStyle(theme);
+  const frame = useSceneTimelineFrame();
   const progress = interpolate(frame, [0, scene.duration * 30], [0, 1], clamp);
-  return <AbsoluteFill style={{ backgroundColor: palette.background, color: palette.ink, fontFamily: '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif', padding: `${portrait ? 62 * scale : 42 * scale}px ${portrait ? 52 * scale : 72 * scale}px`, overflow: 'hidden', fontWeight: 400 }}>
+  return <AbsoluteFill style={{ backgroundColor: palette.background, color: palette.ink, fontFamily, padding: `${portrait ? 62 * scale : 42 * scale}px ${portrait ? 52 * scale : 72 * scale}px`, overflow: 'hidden', fontWeight: 400 }}>
     <ArchiveAtmosphere palette={palette} portrait={portrait} />
     <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 34 * scale, flexShrink: 0, color: palette.muted }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 13 * scale, fontVariantNumeric: 'tabular-nums' }}><span style={{ fontSize: 29 * scale, color: palette.ink, fontWeight: 300 }}>{String(index + 1).padStart(2, '0')}</span><span style={{ fontSize: 16 * scale }}>/</span><span style={{ fontSize: 16 * scale }}>{String(count).padStart(2, '0')}</span></div>

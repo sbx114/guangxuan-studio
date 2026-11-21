@@ -1,0 +1,18 @@
+Gx 0.2.0 Windows x64 安装版
+
+运行 Setup.exe，选择安装目录即可。安装仅用于当前 Windows 账户，无需管理员权限。
+从开始菜单的“Gx”或安装目录中的 Gx.exe 打开应用，无需预装 Node.js。
+首次启动需要联网，从 FFmpeg 构建及 yt-dlp 的官方发布来源下载固定版本的视频工具，并核对 SHA256。
+这些工具保存在当前账户的应用数据目录 tools 中；准备完成后可离线使用已有素材。
+“启动Gx.cmd”是兼容入口，需要 Node.js 24+；正常使用请打开 Gx.exe。
+Remotion 与原生剪辑导出使用本机的 Microsoft Edge 或 Google Chrome。
+
+在“模型连接”填写自己的服务地址、模型与 API 密钥。此发行包不包含密钥或用户工程。
+原生桌面版的项目与设置位于 %APPDATA%\Guangxuan Studio。
+兼容入口的数据位于 %LOCALAPPDATA%\GuangxuanStudio。
+卸载仅删除安装器写入的程序文件，保留上述工程和设置。
+升级前请退出 Gx；保留当前安装目录即可继续使用同一账户的工程。
+
+此版本未进行代码签名。请从项目的 GitHub Release 获取安装器，并核对发布的 SHA256。
+项目自身 MIT 许可证位于 resources\app\LICENSE；根目录 LICENSE 属于 Electron。
+第三方代码、字体、素材及工具保留各自许可证，请阅读 resources\app\THIRD_PARTY_NOTICES.md。

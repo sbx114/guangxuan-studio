@@ -26,7 +26,30 @@ test('each real project has exactly one canonical cell without row or column wra
     assert.equal(fileAtCell({ lane: cell.lane + 5, row: cell.row }), -1);
     assert.equal(fileAtCell({ lane: cell.lane, row: cell.row + 32 }), -1);
   });
-  assert.deepEqual(columnFiles(0), [0, 5, 10, 15, 20, 25]);
+  assert.deepEqual(columnFiles(0), Array.from({ length: 14 }, (_, index) => index * 2));
+  assert.deepEqual(columnFiles(1), Array.from({ length: 13 }, (_, index) => index * 2 + 1));
+  assert.deepEqual(columnFiles(2), []);
+});
+
+test('one physical wave holds every project of one kind while all kinds stay in records', () => {
+  setProjects([project(0), project(1), project(2, { kind: 'science' }), project(3, { kind: 'video' }), project(4, { kind: 'writing' }), project(5, { kind: 'science' })]);
+  assert.equal(records.length, 6);
+  assert.deepEqual(projectCells(), [{ lane: 0, row: 12 }, { lane: 1, row: 12 }, { lane: 2, row: 12 }, { lane: 0, row: 13 }, { lane: 1, row: 13 }, { lane: 2, row: 13 }]);
+  assert.deepEqual(columnFiles(0), [0, 3]); assert.deepEqual(columnFiles(1), [1, 4]); assert.deepEqual(columnFiles(2), [2, 5]);
+  const before = projectCells().map(cell => ({ ...cell }));
+  for (const lane of [2, 1, 0, 1, 2]) for (const index of columnFiles(lane)) assert.equal(fileLocation(index).lane, lane);
+  assert.deepEqual(projectCells(), before, 'browsing another wave must not filter or reposition records');
+  setProjects([...records, project(6, { kind: 'video' })]);
+  assert.equal(projectAtCell({ lane: 1, row: 13 }), 4); assert.equal(projectAtCell({ lane: 2, row: 13 }), 5);
+  assert.equal(projectAtCell({ lane: 0, row: 14 }), 6);
+});
+
+test('an empty category has no project and kind updates relocate only the affected lanes', () => {
+  setProjects([project(0), project(1, { kind: 'video' }), project(2, { kind: 'science' })]);
+  assert.deepEqual(columnFiles(1), []); assert.equal(projectAtCell({ lane: 1, row: 12 }), -1);
+  mergeProject({ id: records[1].id, kind: 'writing' });
+  assert.deepEqual(columnFiles(0), [0]); assert.deepEqual(columnFiles(1), [1]); assert.deepEqual(columnFiles(2), [2]);
+  assert.equal(projectAtCell({ lane: 0, row: 13 }), -1); assert.equal(projectAtCell({ lane: 1, row: 12 }), 1);
 });
 
 test('metadata-only updates retain createdAt + id layout order', () => {
@@ -65,9 +88,25 @@ test('unknown duration stays unknown rather than becoming zero', () => {
   assert.equal(records[0].duration, null);
 });
 
-test('balanced is the default while explicit high/original presets survive normalization', () => {
-  const balanced = normalizeQuality(undefined);
-  assert.equal(matchingPreset(balanced), 'balanced'); assert.equal(balanced.aoSamples, 16); assert.equal(balanced.aoResolution, 0.5); assert.equal(balanced.pixelRatio, 1);
+test('science projects and per-project covers survive archive updates while unknown covers fall back', () => {
+  setProjects([project(0, { kind: 'science', cover: 'blueprint' }), project(1, { cover: 'unknown-legacy-cover' }), project(2)]);
+  assert.equal(records[0].kind, 'science');
+  assert.equal(records[0].category, '科普项目');
+  assert.equal(records[0].department, '科普');
+  assert.equal(records[0].en, 'SCIENCE PROJECT');
+  assert.equal(records[0].cover, 'blueprint');
+  assert.equal(records[1].cover, 'classic');
+  assert.equal(records[2].cover, 'classic');
+  mergeProject({ id: records[0].id, title: '改名后仍保留封面' });
+  assert.equal(records[0].cover, 'blueprint');
+  mergeProject({ id: records[0].id, cover: 'film' });
+  assert.equal(records[0].cover, 'film');
+  assert.equal(records[1].cover, 'classic');
+});
+
+test('original is the default while explicit quality presets survive normalization', () => {
+  const original = normalizeQuality(undefined);
+  assert.equal(matchingPreset(original), 'original'); assert.equal(original.aoSamples, 32); assert.equal(original.aoResolution, 1); assert.equal(original.pixelRatio, 1.5);
   assert.deepEqual(normalizeQuality(qualityPresets.high), qualityPresets.high);
   assert.deepEqual(normalizeQuality(qualityPresets.original), qualityPresets.original);
 });

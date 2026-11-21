@@ -1,7 +1,13 @@
+import { normalizeArchiveCover, normalizeCoverAssetId, customCoverUrl, type ArchiveCoverId } from "./archive-cover.ts";
+import { archiveWorkspaces, workspaceForKind, workspaceLane } from "./workspace-navigation.ts";
+
 export interface ProjectSummary {
   id: string;
   title: string;
-  kind: "video" | "writing";
+  kind: "video" | "writing" | "science";
+  cover: ArchiveCoverId;
+  coverAssetId: string;
+  coverUrl: string;
   description: string;
   createdAt: string;
   updatedAt: string;
@@ -25,25 +31,35 @@ export interface ArchiveRecord extends ProjectSummary {
 }
 
 export const records: ArchiveRecord[] = [];
-export const categories = ["全部档案", "视频项目", "文案项目"];
-export const archiveColumns = ["第 1 列", "第 2 列", "第 3 列", "第 4 列", "第 5 列"];
+export const categories = ["全部档案", "视频项目", "文案项目", "科普项目"];
+export const archiveColumns = archiveWorkspaces.map(workspace => workspace.label);
 export let projectsReady = false;
 export type ProjectCell = { lane: number; row: number };
 let cells: ProjectCell[] = [];
 let cellIndices = new Map<string, number>();
+function rebuildCells() {
+  const rows = new Map<number, number>();
+  cells = records.map(record => {
+    const lane = workspaceLane(workspaceForKind(record.kind));
+    const row = rows.get(lane) ?? 12;
+    rows.set(lane, row + 1);
+    return { lane, row };
+  });
+  cellIndices = new Map(cells.map((cell, index) => [`${cell.lane}:${cell.row}`, index]));
+}
 
 const boundedNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(value, 1e9) : 0;
 const dateText = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : "";
 function normalizeProject(value: unknown): ArchiveRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const p = value as Record<string, unknown>;
-  if (typeof p.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(p.id) || !["video", "writing"].includes(String(p.kind))) return null;
-  const kind = p.kind as "video" | "writing";
+  if (typeof p.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(p.id) || !["video", "writing", "science"].includes(String(p.kind))) return null;
+  const kind = p.kind as ProjectSummary["kind"];
   const description = typeof p.description === "string" ? p.description.slice(0, 1000) : "";
   return {
-    id: p.id, title: typeof p.title === "string" && p.title.trim() ? p.title.trim().slice(0, 120) : "未命名项目", kind, description,
+    id: p.id, title: typeof p.title === "string" && p.title.trim() ? p.title.trim().slice(0, 120) : "未命名项目", kind, description, cover: normalizeArchiveCover(p.cover), coverAssetId: normalizeCoverAssetId(p.coverAssetId), coverUrl: customCoverUrl(p.coverAssetId),
     createdAt: dateText(p.createdAt), updatedAt: dateText(p.updatedAt), duration: typeof p.duration === "number" && Number.isFinite(p.duration) && p.duration >= 0 ? boundedNumber(p.duration) : null, clipCount: boundedNumber(p.clipCount), wordCount: boundedNumber(p.wordCount), outputCount: boundedNumber(p.outputCount),
-    en: kind === "video" ? "VIDEO PROJECT" : "WRITING PROJECT", department: kind === "video" ? "视频剪辑" : "文案写作", category: kind === "video" ? "视频项目" : "文案项目",
+    en: kind === "video" ? "VIDEO PROJECT" : kind === "science" ? "SCIENCE PROJECT" : "WRITING PROJECT", department: kind === "video" ? "视频剪辑" : kind === "science" ? "科普" : "文案写作", category: kind === "video" ? "视频项目" : kind === "science" ? "科普项目" : "文案项目",
     date: dateText(p.updatedAt), lead: "", clearance: "本地项目", abstract: description, findings: [], source: "", status: "available",
   };
 }
@@ -57,8 +73,7 @@ export function setProjects(input: unknown) {
   }
   const ordered = [...incoming.values()].sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0) || a.id.localeCompare(b.id));
   records.splice(0, records.length, ...ordered);
-  cells = records.map((_, index) => ({ lane: index % 5, row: 12 + Math.floor(index / 5) }));
-  cellIndices = new Map(cells.map((cell, index) => [`${cell.lane}:${cell.row}`, index]));
+  rebuildCells();
   projectsReady = true;
   return records;
 }
@@ -69,11 +84,11 @@ export function mergeProject(input: unknown) {
   const index = records.findIndex(record => record.id === value.id);
   if (index < 0) return null;
   const record = normalizeProject({ ...records[index], ...value });
-  if (record) records[index] = record;
+  if (record) { const moved = records[index].kind !== record.kind; records[index] = record; if (moved) rebuildCells(); }
   return record;
 }
 
-export function columnFiles(lane: number) { return records.map((_, index) => index).filter(index => index % 5 === lane); }
+export function columnFiles(lane: number) { return cells.flatMap((cell, index) => cell.lane === lane ? [index] : []); }
 export function fileLocation(index: number) {
   if (!Number.isInteger(index) || !records[index]) return { lane: 2, row: 12, slot: -1 };
   return { ...cells[index], slot: index };

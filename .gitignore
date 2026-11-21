@@ -36,3 +36,8 @@ Desktop.ini
 .DS_Store
 .vscode/
 .idea/
+work/
+outputs/
+artifacts/
+*.pfx
+*.p12

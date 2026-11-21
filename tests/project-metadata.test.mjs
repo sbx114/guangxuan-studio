@@ -6,11 +6,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createProjectStore } from '../lib/store.mjs';
 import { startServer } from '../server.mjs';
 
-async function temporaryData(t) {
+async function temporaryData(t, beforeRemove = async () => {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'guangxuan-metadata-test-'));
   t.after(async () => {
     const resolved = path.resolve(directory);
     if (path.dirname(resolved) !== path.resolve(os.tmpdir()) || !path.basename(resolved).startsWith('guangxuan-metadata-test-')) throw new Error('Refusing unsafe cleanup target');
+    await beforeRemove();
     await rm(resolved, { recursive: true, force: true });
   });
   return directory;
@@ -58,9 +59,9 @@ test('metadata PATCH and queued autosaves preserve rename, editing content, and 
 });
 
 test('real metadata HTTP endpoints reject invalid patches and return only bounded project summaries', async t => {
-  const dataDir = await temporaryData(t);
-  const app = await startServer({ dataDir, port: 0 });
-  t.after(() => app.close());
+  let app;
+  const dataDir = await temporaryData(t, () => app?.close());
+  app = await startServer({ dataDir, port: 0 });
   async function request(route, method = 'GET', body) {
     const response = await fetch(`${app.url}${route}`, { method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, data: await response.json() };
@@ -90,7 +91,7 @@ test('real metadata HTTP endpoints reject invalid patches and return only bounde
   assert.equal(summarized.status, 200);
   assert.equal(summarized.data.projects.length, 1);
   const summary = summarized.data.projects[0];
-  assert.deepEqual(Object.keys(summary).sort(), ['id', 'title', 'kind', 'description', 'createdAt', 'updatedAt', 'duration', 'clipCount', 'wordCount', 'outputCount'].sort());
+  assert.deepEqual(Object.keys(summary).sort(), ['id', 'title', 'kind', 'description', 'cover', 'coverAssetId', 'coverUrl', 'createdAt', 'updatedAt', 'duration', 'clipCount', 'wordCount', 'outputCount'].sort());
   assert.equal(summary.title, '正式标题');
   assert.equal(summary.duration, 6.75);
   assert.equal(summary.clipCount, 2);
@@ -103,4 +104,34 @@ test('real metadata HTTP endpoints reject invalid patches and return only bounde
   const full = await request('/api/projects/metadata-http');
   assert.equal(full.status, 200);
   assert.equal(full.data.project.source.text, 'SOURCE_MUST_NOT_APPEAR_IN_SUMMARY');
+});
+
+test('archive covers persist per project and survive stale or cover-unaware editor autosaves', async t => {
+  const store = await createProjectStore(await temporaryData(t));
+  const original = await store.save('covered-project', { kind: 'science', title: '光的传播', outputs: { article: { body: '原稿' } } });
+  await store.save('other-project', { kind: 'writing', title: '其他项目' });
+  assert.equal(original.cover, 'classic');
+  const patched = await store.patchMetadata(original.id, { cover: 'blueprint' });
+  assert.equal(patched.cover, 'blueprint');
+  assert.equal(patched.metadataRevision, 1);
+  await store.save(original.id, { ...original, outputs: { article: { body: '新的科普内容' } } });
+  let saved = await store.read(original.id);
+  assert.equal(saved.cover, 'blueprint');
+  assert.equal(saved.outputs.article.body, '新的科普内容');
+  assert.equal(saved.kind, 'science');
+  const coverUnaware = { ...saved };
+  delete coverUnaware.cover;
+  await store.save(original.id, coverUnaware);
+  assert.equal((await store.read(original.id)).cover, 'blueprint');
+  for (const cover of ['classic', 'blueprint', 'film', 'paper']) {
+    await store.patchMetadata(original.id, { cover });
+    assert.equal((await store.summary()).projects.find(project => project.id === original.id).cover, cover);
+  }
+  saved = await store.read(original.id);
+  for (const cover of [null, '', 'not-a-cover', '../file', 'https://example.test/cover.png', { id: 'film' }]) {
+    await assert.rejects(store.patchMetadata(original.id, { cover }), error => error.code === 'INVALID_PROJECT_COVER');
+  }
+  assert.deepEqual(await store.read(original.id), saved);
+  assert.equal((await store.read('other-project')).cover, 'classic');
+  await store.settle();
 });

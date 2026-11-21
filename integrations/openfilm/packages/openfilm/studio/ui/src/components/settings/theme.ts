@@ -1,5 +1,5 @@
 /**
- * The theme: light, dark or the system's, dark until the person chooses. The choice is kept in localStorage `openfilm.theme` and shown as
+ * The theme: light, dark or the system's, light until the person chooses. The choice is kept in localStorage `openfilm.theme` and shown as
  * `<html data-theme>`; index.html applies it before the first paint, this keeps it current afterwards, in every page
  * of Studio that is open.
  */
@@ -13,8 +13,8 @@ const dark = () => window.matchMedia('(prefers-color-scheme: dark)');
 function saved(): ThemeMode {
   try {
     const value = localStorage.getItem(KEY);
-    return value === 'light' || value === 'system' ? value : 'dark';
-  } catch { return 'dark'; }
+    return value === 'dark' || value === 'system' ? value : 'light';
+  } catch { return 'light'; }
 }
 
 function apply(mode: ThemeMode) {
@@ -42,6 +42,6 @@ export function setThemeMode(mode: ThemeMode) {
 
 /** The chosen theme and a way to change it; every user of it sees the change. */
 export function useThemeMode(): [ThemeMode, (mode: ThemeMode) => void] {
-  const mode = React.useSyncExternalStore((on) => { listeners.add(on); return () => listeners.delete(on); }, saved, () => 'dark' as ThemeMode);
+  const mode = React.useSyncExternalStore((on) => { listeners.add(on); return () => listeners.delete(on); }, saved, () => 'light' as ThemeMode);
   return [mode, setThemeMode];
 }

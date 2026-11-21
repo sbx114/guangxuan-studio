@@ -721,6 +721,9 @@ export interface TimelineProps {
   markerLane?: { shown: boolean; render: (lane: MarkerLaneView) => React.ReactNode };
   /** The toolbar's Add marker (left of split); M does the same. */
   onAddMarker?: () => void;
+  /** Gx's scoped AI composer; selecting or marking a range never edits until the user sends a request. */
+  onAiRange?: () => void;
+  aiRangeReady?: boolean;
   /** The toolbar's record button (components/RecordButton): sound from the microphone, put on at the playhead. */
   recorder?: Pick<RecordButtonProps, 'now' | 'onSave'>;
   /** The ruler's own right-click menu, at a moment (film ms): adding a marker there. */
@@ -1017,6 +1020,8 @@ export const Timeline = React.memo(function Timeline({
   solo,
   markerLane,
   onAddMarker,
+  onAiRange,
+  aiRangeReady = false,
   recorder,
   rulerMenu,
   trackOverlay,
@@ -4082,6 +4087,9 @@ export const Timeline = React.memo(function Timeline({
           <ModePicker mode={mode} onPick={setMode} />
           <span className="mx-0.5 h-4 w-px" style={{ background: TL.line }} />
         </> : null}
+        {onAiRange ? <ToolButton onClick={onAiRange} disabled={!aiRangeReady} label="AI修改所选区间" hint="框选片段或用 I / O 标记区间后修改">
+          <MessageSquarePlus size={16} />
+        </ToolButton> : null}
 
         {history ? (
           <>

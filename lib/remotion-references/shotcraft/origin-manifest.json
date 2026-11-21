@@ -1,0 +1,457 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+  "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+  "license": "Apache-2.0",
+  "licenseFile": "LICENSE",
+  "licenseSHA256": "b2ce9877a55547ada9b870150664d1468ff777e67cc9888806a73927d31c5771",
+  "upstreamNotice": null,
+  "attributionFile": "UPSTREAM_ATTRIBUTION.md",
+  "usage": "Original pinned source text for AI reference and independent adaptation. Never executed as an installed template or scene enum.",
+  "references": [
+    {
+      "key": "motion-signals",
+      "title": "轨迹速度、跟随与阻尼回弹",
+      "kind": "motion",
+      "tags": [
+        "运动",
+        "轨迹",
+        "速度",
+        "跟随",
+        "惯性",
+        "拖影",
+        "回弹",
+        "缓动",
+        "物理",
+        "velocity",
+        "follow",
+        "recoil"
+      ],
+      "summary": "用纯函数轨迹采样得到速度/方向，做延迟跟随与闭式阻尼回弹；不累积逐帧状态。",
+      "sourcePath": "assets/lib/helpers/motion.ts",
+      "dependencies": [],
+      "relatedPaths": [],
+      "adaptation": [
+        "把posAt/stateAt写成frame的纯函数；根据主体尺寸归一化幅度，不复制成固定镜头。"
+      ]
+    },
+    {
+      "key": "motion-polish",
+      "title": "可组合缓动、速度拖影与表面质感",
+      "kind": "motion",
+      "tags": [
+        "缓动",
+        "贝塞尔",
+        "运动模糊",
+        "拖影",
+        "速度",
+        "阴影",
+        "颗粒",
+        "质感",
+        "easing",
+        "bezier",
+        "blur",
+        "shadow"
+      ],
+      "summary": "提供bezier/EASE/ramp/mix/velocity、SpeedBlur、softShadow等基础件，供任意自定义组件组合。",
+      "sourcePath": "demos/_fixtures/Polish.tsx",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [],
+      "adaptation": [
+        "只选需要的函数/组件，替换演示字体与配色；不要把颗粒或扫光作为每镜默认装饰。"
+      ]
+    },
+    {
+      "key": "page-camera",
+      "title": "清晰的页面空间2.5D关键帧相机",
+      "kind": "camera",
+      "tags": [
+        "相机",
+        "镜头",
+        "运镜",
+        "视角",
+        "平移",
+        "缩放",
+        "透视",
+        "页面",
+        "清晰",
+        "camera",
+        "pan",
+        "zoom",
+        "2.5d"
+      ],
+      "summary": "PageCam按frame/cx/cy/zoom/rotation关键帧插值，页面空间overlay共享坐标；3D放大走布局级CSS zoom。",
+      "sourcePath": "assets/lib/PageCam.tsx",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [],
+      "adaptation": [
+        "原实现以1920×1080和960/540中心标定；改为当前Composition尺寸并重算焦点。",
+        "src必须改用当前工程实际public资源；纯文字内容不要强行斜拍。"
+      ]
+    },
+    {
+      "key": "video-surface",
+      "title": "真实视频表面与音画同步交叉淡化循环",
+      "kind": "media",
+      "tags": [
+        "视频",
+        "素材",
+        "实拍",
+        "媒体",
+        "循环",
+        "交叉淡化",
+        "音频",
+        "video",
+        "loop",
+        "crossfade",
+        "footage"
+      ],
+      "summary": "ClipCard把OffthreadVideo作为可被任意运镜驱动的主体；循环用相邻Sequence互补透明度/音量包络。",
+      "sourcePath": "assets/lib/ClipCard.tsx",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [],
+      "adaptation": [
+        "替换固定卡片外观和尺寸；传入实际素材时长与当前镜头durationInFrames，不用整片长度计算循环层数。",
+        "startFrom和循环长度均为帧，按当前fps换算；给足循环边界的帧预算。"
+      ]
+    },
+    {
+      "key": "digit-roll",
+      "title": "逐位错峰的机械数字滚轮",
+      "kind": "typography",
+      "tags": [
+        "数字",
+        "计数",
+        "数据",
+        "图表",
+        "滚轮",
+        "排版",
+        "digit",
+        "counter",
+        "odometer"
+      ],
+      "summary": "DigitRoll为每位数字建立两条数字带，按目标数字、错峰和Bezier滚动，标点保持原样。",
+      "sourcePath": "assets/lib/DigitRoll.tsx",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [],
+      "adaptation": [
+        "value仅使用真实输入数据；字体、字号、颜色改为当前设计，不沿用演示外观。"
+      ]
+    },
+    {
+      "key": "vertical-ticker",
+      "title": "任意ReactNode的无缝透视滚动列",
+      "kind": "layout",
+      "tags": [
+        "滚动",
+        "列表",
+        "多列",
+        "循环",
+        "透视",
+        "墙",
+        "错位",
+        "ticker",
+        "scroll",
+        "columns",
+        "wall"
+      ],
+      "summary": "VerticalTicker接受任意ReactNode列，双份内容与逐项margin保证周期精确，避免flex gap造成循环跳帧。",
+      "sourcePath": "assets/lib/VerticalTicker.tsx",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [],
+      "adaptation": [
+        "按画幅调整列宽、透视与遮罩；durationInSeconds应大于0。",
+        "可用于图片/文本/图形，不把示例内容或黑底当成固定设计。"
+      ]
+    },
+    {
+      "key": "type-assemble",
+      "title": "基线锚定的首词推近与排版组装",
+      "kind": "typography",
+      "tags": [
+        "文字",
+        "标题",
+        "排版",
+        "字标",
+        "组句",
+        "基线",
+        "推近",
+        "字体",
+        "type",
+        "text",
+        "baseline",
+        "assemble"
+      ],
+      "summary": "实际测量行宽、首词中心与基线，用delayRender等待测量；缩放和位移共享曲线，避免字形落位抖动。",
+      "sourcePath": "demos/typography/lead-word-zoom-assemble/LeadWordZoomAssemble.tsx",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [
+        "demos/_fixtures/Polish.tsx"
+      ],
+      "adaptation": [
+        "原文案、品牌词、84帧及背景均是演示参数，需按当前内容重写。",
+        "原实现按空格切词；中文应传入显式词组或做本地分词，不能直接把整句当一个英文单词。",
+        "保留测量、基线锚定和共同曲线机制；去掉不适合的crash/blur装饰。"
+      ]
+    },
+    {
+      "key": "whip-brake",
+      "title": "连续速度积分的甩镜急刹与清晰落点",
+      "kind": "rhythm",
+      "tags": [
+        "甩镜",
+        "急刹",
+        "节奏",
+        "速度",
+        "刹车",
+        "长廊",
+        "滚动",
+        "停留",
+        "whip",
+        "brake",
+        "rhythm",
+        "velocity"
+      ],
+      "summary": "WhipBrakeReal用确定性预积分速度表驱动长廊/机械计数/方向拖影，同一曲线快速经过、长尾减速并落在可读内容。",
+      "sourcePath": "demos/transition/shot-transitions/WhipBrakeReal.tsx",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [
+        "demos/_fixtures/Polish.tsx",
+        "demos/_fixtures/Look.tsx"
+      ],
+      "adaptation": [
+        "源码引用演示layout JSON和页面纹理，必须换成当前项目的真实布局/受控素材，不能保留不存在的路径。",
+        "抽取progress/dxAt和速度派生关系，按实际距离、fps与阅读停留重标时值；不复制纸张皮肤和文案。"
+      ]
+    },
+    {
+      "key": "editable-timebase",
+      "title": "可编辑单元的帧率与媒体时间语义",
+      "kind": "editing",
+      "tags": [
+        "帧率",
+        "变速",
+        "时基",
+        "裁入",
+        "媒体",
+        "编辑",
+        "时间线",
+        "fps",
+        "speed",
+        "timebase",
+        "trim"
+      ],
+      "summary": "CardDef/PropField与cardFps/sourceLength/clipDefaultsFor明确区分逐帧动画与实时音视频，跨fps换算片长及反向speed。",
+      "sourcePath": "workbench/src/cards/types.ts",
+      "dependencies": [
+        "react"
+      ],
+      "relatedPaths": [],
+      "adaptation": [
+        "结构是Workbench的编辑契约；适配Gx已有clipId/revision与秒/帧边界，不创建第二套不一致时间线。"
+      ]
+    },
+    {
+      "key": "manifest-tracks",
+      "title": "源码清单到独立镜头、字幕、转场和音轨",
+      "kind": "editing",
+      "tags": [
+        "多轨",
+        "剪辑",
+        "拆解",
+        "镜头",
+        "字幕",
+        "音效",
+        "轨道",
+        "参数",
+        "props",
+        "manifest",
+        "tracks",
+        "edit",
+        "timeline"
+      ],
+      "summary": "buildProjectFromManifest将自由组件清单映射独立轨道，packAudio贪心装箱无重叠音轨；同源清单定义组件、props/schema和时间。",
+      "sourcePath": "workbench/src/projectImport.ts",
+      "dependencies": [
+        "react",
+        "remotion"
+      ],
+      "relatedPaths": [
+        "workbench/src/cards/manifest.ts",
+        "workbench/src/preview/Composition.tsx",
+        "workbench/src/cards/types.ts"
+      ],
+      "adaptation": [
+        "必须改接Gx的工程/原生事务接口，不直接导入该仓库registry、store、i18n或theme模块。",
+        "MainComposition对图形可用Freeze时间映射；Audio/Video必须走原生trim/playbackRate，不能包Freeze导致丢声音。",
+        "manifest component引用仅在生成工程浏览器内使用，不在Gx主进程eval或动态import用户源码。"
+      ]
+    }
+  ],
+  "sources": {
+    "assets/lib/helpers/motion.ts": {
+      "file": "assets__lib__helpers__motion.ts.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "assets/lib/helpers/motion.ts",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/assets/lib/helpers/motion.ts",
+      "bytes": 1708,
+      "sha256": "9123bacf8078982a903bb565923974902212f93ebe265e24d188e4362a8e251f",
+      "gitBlobSha": "1b18f9bbea86144f618a780572c8fc2964659144",
+      "license": "Apache-2.0"
+    },
+    "demos/_fixtures/Polish.tsx": {
+      "file": "demos___fixtures__Polish.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "demos/_fixtures/Polish.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/demos/_fixtures/Polish.tsx",
+      "bytes": 13719,
+      "sha256": "21dfe2f36325c07ccaa1a619007e24a2b5b3d6a82030d3c1772de902551c2842",
+      "gitBlobSha": "a060108a418c10c20894aa0b0700be6891c7d915",
+      "license": "Apache-2.0"
+    },
+    "assets/lib/PageCam.tsx": {
+      "file": "assets__lib__PageCam.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "assets/lib/PageCam.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/assets/lib/PageCam.tsx",
+      "bytes": 6878,
+      "sha256": "1679bfc0c15973d5a51f6b600ae17d4d8c06c2fa3f8513e5110f9d0b9b3271de",
+      "gitBlobSha": "847e5ca1ef48706ae5eb3569df1ce35250851134",
+      "license": "Apache-2.0"
+    },
+    "assets/lib/ClipCard.tsx": {
+      "file": "assets__lib__ClipCard.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "assets/lib/ClipCard.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/assets/lib/ClipCard.tsx",
+      "bytes": 6815,
+      "sha256": "3532788285cfe52fef4e836979832054c41885b238f4055fd84b40c8de44670b",
+      "gitBlobSha": "6827f5eb112c7c5239d6b9a1a82a6fa32dd00d48",
+      "license": "Apache-2.0"
+    },
+    "assets/lib/DigitRoll.tsx": {
+      "file": "assets__lib__DigitRoll.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "assets/lib/DigitRoll.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/assets/lib/DigitRoll.tsx",
+      "bytes": 1708,
+      "sha256": "aeb03c74d481a238dcd413af3054c264f9b4f91d5c745620e10a361fa4cbc20b",
+      "gitBlobSha": "65537ce91a2714e8d1f2a382d1edecd06d4c2c2d",
+      "license": "Apache-2.0"
+    },
+    "assets/lib/VerticalTicker.tsx": {
+      "file": "assets__lib__VerticalTicker.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "assets/lib/VerticalTicker.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/assets/lib/VerticalTicker.tsx",
+      "bytes": 4082,
+      "sha256": "e4f90b838559beae465c6bb08736c00097bb0107d6dd4a378f64308e2acf1bae",
+      "gitBlobSha": "fe859dd53dca3998a59b6760e71380abb92a9135",
+      "license": "Apache-2.0"
+    },
+    "demos/typography/lead-word-zoom-assemble/LeadWordZoomAssemble.tsx": {
+      "file": "demos__typography__lead-word-zoom-assemble__LeadWordZoomAssemble.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "demos/typography/lead-word-zoom-assemble/LeadWordZoomAssemble.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/demos/typography/lead-word-zoom-assemble/LeadWordZoomAssemble.tsx",
+      "bytes": 10727,
+      "sha256": "7f344745da762ad9eb5f3073963adda41e16dffec707b46b397eaac6a9c4ab35",
+      "gitBlobSha": "d72396082cf5742a28f2347db187bdaa73d4c83f",
+      "license": "Apache-2.0"
+    },
+    "demos/transition/shot-transitions/WhipBrakeReal.tsx": {
+      "file": "demos__transition__shot-transitions__WhipBrakeReal.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "demos/transition/shot-transitions/WhipBrakeReal.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/demos/transition/shot-transitions/WhipBrakeReal.tsx",
+      "bytes": 9978,
+      "sha256": "eef7e15e3a53e8fa69affa28b403985600f09b408eeb1149b6c4e6202f4c0ada",
+      "gitBlobSha": "cbd9cad7918e0c08afe90dae775a365eba1d2002",
+      "license": "Apache-2.0"
+    },
+    "demos/_fixtures/Look.tsx": {
+      "file": "demos___fixtures__Look.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "demos/_fixtures/Look.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/demos/_fixtures/Look.tsx",
+      "bytes": 18440,
+      "sha256": "88b97d49a5489126eaaaff2269d02fd491ccbd7f13f3e1d6df764a592635ae28",
+      "gitBlobSha": "f105b256ffd15f4eb6e77a6872e8edc3d8121fba",
+      "license": "Apache-2.0"
+    },
+    "workbench/src/cards/types.ts": {
+      "file": "workbench__src__cards__types.ts.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "workbench/src/cards/types.ts",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/workbench/src/cards/types.ts",
+      "bytes": 5406,
+      "sha256": "7219651d75df3845dcb29da3ccad1b7da4ebf1e44e724033672b2e2d16e1c2ec",
+      "gitBlobSha": "1c678f45a2cc8ad9ea325c6f463e9466f2968aad",
+      "license": "Apache-2.0"
+    },
+    "workbench/src/projectImport.ts": {
+      "file": "workbench__src__projectImport.ts.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "workbench/src/projectImport.ts",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/workbench/src/projectImport.ts",
+      "bytes": 4004,
+      "sha256": "6618c18905450616797e0eb21969cdbe3cf211dc8e851217482393503e8f25c6",
+      "gitBlobSha": "330c7cdec84b41969d79c583d4d10c1df8d8c291",
+      "license": "Apache-2.0"
+    },
+    "workbench/src/cards/manifest.ts": {
+      "file": "workbench__src__cards__manifest.ts.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "workbench/src/cards/manifest.ts",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/workbench/src/cards/manifest.ts",
+      "bytes": 7331,
+      "sha256": "10dbce6027669fdf5938bda861e9b26a679f3c88e720039ba2dc6600706fc017",
+      "gitBlobSha": "0ebcb19a6aa08267ebaef2c57cfe790810217c71",
+      "license": "Apache-2.0"
+    },
+    "workbench/src/preview/Composition.tsx": {
+      "file": "workbench__src__preview__Composition.tsx.source.txt",
+      "repository": "https://github.com/Vincentwei1021/video-shotcraft",
+      "commit": "075b548c2405a07b77129eb448b0b504fc60dea3",
+      "path": "workbench/src/preview/Composition.tsx",
+      "url": "https://github.com/Vincentwei1021/video-shotcraft/blob/075b548c2405a07b77129eb448b0b504fc60dea3/workbench/src/preview/Composition.tsx",
+      "bytes": 3281,
+      "sha256": "2aebbbf17912ccfbdd518a62907aea223a52ee869a8aa39d5f85a701d9038d49",
+      "gitBlobSha": "e5086deda72dffe885d2ae33d48014c295566c93",
+      "license": "Apache-2.0"
+    }
+  }
+}

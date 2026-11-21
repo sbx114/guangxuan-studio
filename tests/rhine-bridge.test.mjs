@@ -11,9 +11,12 @@ test('the homepage can only navigate through the expected same-origin frame', ()
   assert.equal(rhineCommand(data, origin, otherFrame, origin, source), null);
 });
 
-test('homepage navigation rejects arbitrary actions, paths, and incomplete modules', () => {
+test('homepage navigation permits all completed workspaces but rejects unregistered views and paths', () => {
   const source = {}, origin = 'http://127.0.0.1:4417';
-  for (const view of ['https://untrusted.example', '../settings', 'science', 'delete', '__proto__']) {
+  for (const view of ['video', 'writer', 'science']) {
+    assert.deepEqual(rhineCommand({ type: 'guangxuan:open', view }, origin, source, origin, source), { type: 'open', view });
+  }
+  for (const view of ['https://untrusted.example', '../settings', 'unregistered-workspace', 'delete', '__proto__']) {
     assert.equal(rhineCommand({ type: 'guangxuan:open', view }, origin, source, origin, source), null);
   }
   assert.equal(rhineCommand({ type: 'save-key', view: 'settings' }, origin, source, origin, source), null);

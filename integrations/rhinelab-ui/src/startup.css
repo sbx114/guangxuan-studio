@@ -1,4 +1,5 @@
 #viewport > .loading { position: fixed; }
+.archive-workspace-tabs[hidden] { display: none !important; }
 .entry-controls { display: flex; align-items: center; flex-direction: column; margin-top: 32px; max-width: calc(100vw - 40px); text-align: center; }
 .entry-start { min-height: 48px; padding: 8px 24px; border-block: 1px solid #969183; font-size: 16px; letter-spacing: 2px; }
 .entry-start:disabled, .entry-start[aria-disabled="true"] { color: #888277; cursor: wait; }

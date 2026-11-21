@@ -1,4 +1,4 @@
-# Install the compatible desktop launcher for the current Windows user.
+﻿# Install the compatible desktop launcher for the current Windows user.
 # Copies application resources only; never launches/stops the app or changes policy.
 [CmdletBinding()]
 param(
@@ -16,9 +16,11 @@ $desktopDirectory = [IO.Path]::GetFullPath($DesktopPath)
 $userDataDirectory = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'GuangxuanStudio'))
 $appDirectory = Join-Path $installationDirectory 'resources\app'
 $markerPath = Join-Path $installationDirectory 'installation.json'
-$shortcutPath = Join-Path $desktopDirectory '光宣工作台.lnk'
-$launcherPath = Join-Path $installationDirectory '启动光宣工作台.cmd'
-$iconPath = Join-Path $installationDirectory '光宣工作台.ico'
+$shortcutPath = Join-Path $desktopDirectory 'Gx.lnk'
+$launcherPath = Join-Path $installationDirectory '启动Gx.cmd'
+$iconPath = Join-Path $installationDirectory 'Gx.ico'
+$legacyShortcutPath = Join-Path $desktopDirectory '光宣工作台.lnk'
+$legacyLauncherPath = Join-Path $installationDirectory '启动光宣工作台.cmd'
 
 function Same-Path([string]$Left, [string]$Right) {
     return [string]::Equals([IO.Path]::GetFullPath($Left).TrimEnd('\', '/'), [IO.Path]::GetFullPath($Right).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
@@ -54,11 +56,12 @@ $required = @(
     'resources\app\integrations\openfilm\LICENSE',
     'resources\app\integrations\openfilm\TRADEMARK.md',
     'resources\app\integrations\openfilm\packages\openfilm\library\LICENSE.md',
-    'resources\app\desktop\icon.png',
+    'resources\app\desktop\icon.ico',
     'resources\app\LICENSE',
     'resources\bin\ffmpeg.exe',
     'resources\bin\ffprobe.exe',
     'resources\third-party',
+    '启动Gx.cmd',
     '启动光宣工作台.cmd',
     '停止本地服务.cmd'
 )
@@ -81,7 +84,14 @@ if (Test-Path -LiteralPath $installationDirectory) {
 $shell = New-Object -ComObject WScript.Shell
 if (Test-Path -LiteralPath $shortcutPath) {
     $oldShortcut = $shell.CreateShortcut($shortcutPath)
-    if (-not (Same-Path $oldShortcut.TargetPath $launcherPath)) { throw 'An unrelated desktop shortcut already uses this name.' }
+    if (-not (Same-Path $oldShortcut.TargetPath $launcherPath) -and
+        -not (Same-Path $oldShortcut.TargetPath $legacyLauncherPath)) { throw 'An unrelated desktop shortcut already uses this name.' }
+}
+$removeLegacyShortcut = $false
+if (Test-Path -LiteralPath $legacyShortcutPath) {
+    $legacyShortcut = $shell.CreateShortcut($legacyShortcutPath)
+    $removeLegacyShortcut = (Same-Path $legacyShortcut.TargetPath $legacyLauncherPath) -or
+        (Same-Path $legacyShortcut.TargetPath $launcherPath)
 }
 
 if (-not $NodePath) {
@@ -121,7 +131,7 @@ function Copy-ApplicationTree([string]$RelativePath) {
 Copy-ApplicationTree 'resources\app'
 Copy-ApplicationTree 'resources\bin'
 Copy-ApplicationTree 'resources\third-party'
-foreach ($name in @('启动光宣工作台.cmd', '停止本地服务.cmd', '重启光宣工作台.cmd')) {
+foreach ($name in @('启动Gx.cmd', '启动光宣工作台.cmd', '停止本地服务.cmd', '重启Gx.cmd', '重启光宣工作台.cmd')) {
     if (-not (Test-Path -LiteralPath (Join-Path $sourceDirectory $name))) { continue }
     $destination = Join-Path $installationDirectory $name
     Assert-InstallationChild $destination
@@ -135,27 +145,15 @@ if ($PSCommandPath -and -not (Same-Path $PSCommandPath $installedInstaller)) {
     Copy-Item -LiteralPath $PSCommandPath -Destination $installedInstaller -Force
 }
 
-# Wrap the existing, original PNG in an ICO container without changing pixels.
-$png = [IO.File]::ReadAllBytes((Join-Path $appDirectory 'desktop\icon.png'))
-$signature = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
-if ($png.Length -lt 24) { throw 'The application icon is incomplete.' }
-for ($index = 0; $index -lt 8; $index++) { if ($png[$index] -ne $signature[$index]) { throw 'The application icon is not PNG.' } }
-$width = [uint32]$png[16] * 16777216 + [uint32]$png[17] * 65536 + [uint32]$png[18] * 256 + [uint32]$png[19]
-$height = [uint32]$png[20] * 16777216 + [uint32]$png[21] * 65536 + [uint32]$png[22] * 256 + [uint32]$png[23]
-if ($width -lt 1 -or $height -lt 1 -or $width -gt 256 -or $height -gt 256) { throw 'The PNG icon must be no larger than 256 by 256 pixels.' }
-$memory = [IO.MemoryStream]::new()
-$writer = [IO.BinaryWriter]::new($memory)
-try {
-    $writer.Write([uint16]0); $writer.Write([uint16]1); $writer.Write([uint16]1)
-    $writer.Write([byte]$(if ($width -eq 256) { 0 } else { $width }))
-    $writer.Write([byte]$(if ($height -eq 256) { 0 } else { $height }))
-    $writer.Write([byte]0); $writer.Write([byte]0)
-    $writer.Write([uint16]1); $writer.Write([uint16]32)
-    $writer.Write([uint32]$png.Length); $writer.Write([uint32]22)
-    $writer.Write($png)
-    $writer.Flush()
-    [IO.File]::WriteAllBytes($iconPath, $memory.ToArray())
-} finally { $writer.Dispose(); $memory.Dispose() }
+# Use the packaged multi-resolution icon so small desktop sizes stay clear.
+$packagedIcon = Join-Path $appDirectory 'desktop\icon.ico'
+$iconBytes = [IO.File]::ReadAllBytes($packagedIcon)
+if ($iconBytes.Length -lt 22 -or [BitConverter]::ToUInt16($iconBytes, 0) -ne 0 -or
+    [BitConverter]::ToUInt16($iconBytes, 2) -ne 1 -or [BitConverter]::ToUInt16($iconBytes, 4) -lt 1 -or
+    $iconBytes.Length -lt (6 + 16 * [BitConverter]::ToUInt16($iconBytes, 4))) {
+    throw 'The packaged application icon is invalid.'
+}
+Copy-Item -LiteralPath $packagedIcon -Destination $iconPath -Force
 
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $launcherPath
@@ -163,11 +161,12 @@ $shortcut.Arguments = ''
 $shortcut.WorkingDirectory = $installationDirectory
 $shortcut.IconLocation = "$iconPath,0"
 $shortcut.WindowStyle = 7
-$shortcut.Description = '光宣工作台 · 本地 AI 创作空间'
+$shortcut.Description = 'Gx · 本地 AI 创作空间'
 $shortcut.Save()
 
 $marker = [ordered]@{
     app = 'GuangxuanStudio'
+    displayName = 'Gx'
     version = [string]$package.version
     installRoot = $installationDirectory
     appRoot = $appDirectory
@@ -189,8 +188,10 @@ if (-not (Same-Path $verified.TargetPath $launcherPath) -or $verified.Arguments 
 $checkOutput = (& $NodePath (Join-Path $appDirectory 'scripts\start-local.mjs') --check | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Installed application dependency check failed.' }
 $check = $checkOutput | ConvertFrom-Json
+if ($removeLegacyShortcut) { Remove-Item -LiteralPath $legacyShortcutPath -Force }
 [ordered]@{
     app = 'GuangxuanStudio'
+    displayName = 'Gx'
     version = [string]$package.version
     installRoot = $installationDirectory
     appRoot = $appDirectory

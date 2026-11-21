@@ -2,7 +2,7 @@ import { execFile, fork } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateAnimationPlan } from './schema.mjs';
+import { validateAnimationPlan, animationFrameCount } from './schema.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,12 +25,33 @@ export async function findAnimationBrowser() {
   throw new Error('动画渲染需要本机安装 Microsoft Edge 或 Google Chrome。安装后重新打开光宣工作台即可。');
 }
 
-export async function renderAnimation({ plan: input, outputPath, onProgress = () => {}, signal } = {}) {
+function renderRange(plan, range) {
+  if (range === undefined) return null;
+  const length = animationFrameCount(plan);
+  if (!Array.isArray(range) || range.length !== 2 || range.some(value => typeof value !== 'number' || !Number.isFinite(value)) || range[0] < 0 || range[1] > length / plan.fps || range[1] <= range[0]) throw new Error('动画小样需要有效的项目起止秒数。');
+  const frames = range.map(value => Math.round(value * plan.fps));
+  if (frames[1] <= frames[0] || frames[1] > length) throw new Error('动画小样区间至少需要一帧。');
+  return frames;
+}
+
+export async function renderAnimation({ plan: input, outputPath, onProgress = () => {}, signal, range } = {}) {
   const plan = validateAnimationPlan(input);
   if (typeof outputPath !== 'string' || !path.isAbsolute(outputPath) || path.extname(outputPath).toLowerCase() !== '.mp4')
     throw new Error('动画输出需要一个有效的 MP4 绝对路径。');
+  return runWorker({ type: 'render', plan, outputPath, rangeFrames: renderRange(plan, range) }, { signal, onProgress });
+}
+
+export async function renderAnimationFrames({ plan: input, outputDirectory, frames, signal, onProgress = () => {} } = {}) {
+  const plan = validateAnimationPlan(input), length = animationFrameCount(plan);
+  if (typeof outputDirectory !== 'string' || !path.isAbsolute(outputDirectory)) throw new Error('分镜预览需要有效的内部输出目录。');
+  if (!Array.isArray(frames) || !frames.length || frames.length > 16 || frames.some(frame => !Number.isInteger(frame) || frame < 0 || frame >= length)) throw new Error('分镜预览需要1至16个有效项目帧。');
+  return runWorker({ type: 'preview', plan, outputDirectory, frames: [...frames] }, { signal, onProgress, timeoutMs: 180000 });
+}
+
+async function runWorker(request, { onProgress, signal, timeoutMs = 15 * 60 * 1000 }) {
   if (signal?.aborted) throw new Error('动画渲染已取消。');
   const browserExecutable = await findAnimationBrowser();
+  if (signal?.aborted) throw new Error('动画渲染已取消。');
   return new Promise((resolve, reject) => {
     const child = fork(path.join(HERE, 'worker.mjs'), [], {
       cwd: path.dirname(HERE), execArgv: [], windowsHide: true,
@@ -40,16 +61,19 @@ export async function renderAnimation({ plan: input, outputPath, onProgress = ()
     let settled = false;
     let errorTail = '';
     let cancelTimer;
-    const timer = setTimeout(() => cancel('动画渲染超过时间限制，请减少场景后重试。'), 15 * 60 * 1000);
+    let cancelRequested = false;
+    const timer = setTimeout(() => cancel('动画渲染超过时间限制，请减少场景后重试。'), timeoutMs);
+    const progress = value => { try { onProgress(value); } catch { /* Optional observers do not own render lifetime. */ } };
     const cleanup = () => { clearTimeout(timer); clearTimeout(cancelTimer); signal?.removeEventListener('abort', aborted); };
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
       cleanup();
-      if (error) reject(error); else { onProgress(1); resolve(result); }
+      if (error) reject(error); else { progress(1); resolve(result); }
     };
     const cancel = (message = '动画渲染已取消。') => {
-      if (settled) return;
+      if (settled || cancelRequested) return;
+      cancelRequested = true;
       if (child.connected) child.send({ type: 'cancel' });
       cancelTimer = setTimeout(() => {
         if (process.platform === 'win32' && Number.isInteger(child.pid)) {
@@ -62,15 +86,15 @@ export async function renderAnimation({ plan: input, outputPath, onProgress = ()
     signal?.addEventListener('abort', aborted, { once: true });
     child.stderr.on('data', (chunk) => { errorTail = `${errorTail}${chunk.toString()}`.slice(-3000); });
     child.on('message', (message) => {
-      if (message?.type === 'progress') onProgress(Math.max(0, Math.min(1, Number(message.progress) || 0)));
-      if (message?.type === 'result') finish(null, message.result);
-      if (message?.type === 'error') finish(new Error(message.message || '动画渲染失败。'));
+      if (message?.type === 'progress') progress(Math.max(0, Math.min(1, Number(message.progress) || 0)));
+      if (message?.type === 'result') finish(signal?.aborted || cancelRequested ? new Error('动画渲染已取消。') : null, message.result);
+      if (message?.type === 'error') finish(new Error(signal?.aborted || cancelRequested ? '动画渲染已取消。' : message.message || '动画渲染失败。'));
     });
     child.on('error', () => finish(new Error('无法启动动画渲染进程。')));
     child.on('exit', (code) => {
       if (!settled) finish(new Error(signal?.aborted ? '动画渲染已取消。' : `动画渲染进程提前退出${code === null ? '' : `（${code}）`}。${errorTail ? ` ${errorTail.slice(-900)}` : ''}`));
     });
     if (signal?.aborted) cancel();
-    else child.send({ type: 'render', plan, outputPath, browserExecutable });
+    else child.send({ ...request, browserExecutable });
   });
 }

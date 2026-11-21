@@ -28,9 +28,9 @@ jobs:
         run: node --test tests/*.test.mjs
       - name: Build portable desktop application
         shell: pwsh
-        run: ./scripts/build-windows.ps1 -CreateZip
+        run: ./scripts/build-windows.ps1 -PublicDistribution -CreateZip
       - uses: actions/upload-artifact@v4
         with:
-          name: Guangxuan-Studio-Windows-x64
-          path: dist/Guangxuan-Studio-win32-x64.zip
+          name: Gx-Windows-x64
+          path: dist/Gx-Windows-x64.zip
           if-no-files-found: error

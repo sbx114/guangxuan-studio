@@ -1,0 +1,17 @@
+.settings-workspace{max-width:840px}
+.settings-workspace .settings-layout{display:block;max-width:none;margin:0}
+.settings-workspace .workspace-title{align-items:center}
+.settings-workspace .workspace-title h1{margin:0}
+.connection-advanced{border-top:1px solid var(--line);margin:24px 0 18px;padding:0}
+.connection-advanced>summary{cursor:pointer;padding:15px 0;font-size:13px;color:var(--muted)}
+.connection-advanced>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.connection-advanced[open]>summary{margin-bottom:8px;color:var(--ink)}
+.connection-advanced .hint{font-size:11px;color:var(--muted);margin:8px 0 18px}
+.connection-advanced .notice{margin:0 0 18px}
+.settings-actions{margin-top:22px;flex-wrap:wrap}
+#settings-result{margin:16px 0 0;line-height:1.6}
+#settings-result:empty{display:none}
+.settings-privacy{font-size:11px;line-height:1.7;color:var(--muted);margin:20px 0 0}
+.workspace-title>.project-title-input{min-width:0;flex:1;max-width:660px}
+.workspace-title>.row{flex-shrink:0}
+@media(max-width:700px){.settings-workspace .settings-layout>.surface{padding:20px}.workspace-title>.project-title-input{flex-basis:100%}.settings-actions .btn{flex:1}.settings-actions .btn.subtle{flex:0 0 auto}}

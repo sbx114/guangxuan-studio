@@ -14,6 +14,7 @@ import {
   Sparkles, X,
 } from 'lucide-react';
 import React from 'react';
+import { confirmManagedExport } from '../../guangxuan-host';
 import { createPortal } from 'react-dom';
 
 import { useLanguage, useT } from '@/i18n';
@@ -57,6 +58,7 @@ import { cleanMoments, loadSharedMoments, MOMENTS_MAX, momentSeconds, saveMoment
 import { MomentPicker } from './MomentPicker';
 import { RangePicker } from './RangePicker';
 import { LARGE_DIALOG, LARGE_DIALOG_BACKDROP } from '../dialog-chrome';
+import { useDialogBoundary } from '../use-dialog-boundary';
 
 type Dest = 'video' | 'alpha' | 'nle' | 'gif' | 'audio' | 'subtitles' | 'images' | 'project';
 type ImageOutput = 'files' | 'zip' | 'pdf' | 'pptx';
@@ -283,6 +285,9 @@ export function ExportCenter(props: ExportCenterProps) {
   const [exportName, setExportName] = React.useState<string>('');
   /** Whether that name was typed over: only then is it sent, so a dialog left alone exports as it always did. */
   const [nameTyped, setNameTyped] = React.useState(false);
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
+  const boundary = useDialogBoundary({ open, panel: dialogRef, initialFocus: closeButtonRef, onClose, canClose: !working });
 
   React.useEffect(() => {
     if (!open) return;
@@ -305,13 +310,6 @@ export function ExportCenter(props: ExportCenterProps) {
   React.useEffect(() => {
     if (hydrated) saveSettings(s);
   }, [s, hydrated]);
-
-  React.useEffect(() => {
-    if (!open) return undefined;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !working) onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, working]);
 
   const stage = props.stage;
   const totalMs = props.durationMs;
@@ -545,6 +543,7 @@ export function ExportCenter(props: ExportCenterProps) {
          of this screen comes through here */
       const typed = nameTyped && !toDrafts ? exportName.trim() : '';
       const named = typed ? jobs.map((job, index) => ({ ...job, name: typed + (canRange && range && rangeDelivery === 'separate' && (parsedRanges?.length ?? 0) > 1 ? ` - ${String(index + 1).padStart(2, '0')}` : '') })) : jobs;
+      if (!await confirmManagedExport(props.projectId, named)) { onClose(); return; }
       const queued = await startExports(props.projectId, named, s.folder || undefined);
       props.onQueued?.(queued);
       onClose();
@@ -594,12 +593,15 @@ export function ExportCenter(props: ExportCenterProps) {
       onClick={() => { if (!working) onClose(); }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={t('exportCenter.title')}
         className={LARGE_DIALOG}
         style={{ animation: 'openfilm-rise 0.16s ease-out both' }}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={boundary}
       >
         {/* left: destinations */}
         {/* the list scrolls when the window is short; the note under it stays whole */}
@@ -642,6 +644,7 @@ export function ExportCenter(props: ExportCenterProps) {
               <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--text-muted)]">{tApp(`exportCenter.destDesc.${dest}`)}</p>
             </div>
             <button
+              ref={closeButtonRef}
               type="button"
               onClick={onClose}
               disabled={Boolean(working)}

@@ -30,11 +30,17 @@ window.addEventListener('message', event => {
       studio?.contentWindow?.postMessage({ type: 'guangxuan:studio-metadata', nativeProjectId, title: typeof event.data.title === 'string' ? event.data.title.slice(0, 120) : '' }, nativeOrigin);
     }
     if (event.data?.type === 'guangxuan:studio-flush' && validId(event.data.requestId)) studio?.contentWindow?.postMessage({ type: 'guangxuan:studio-flush', requestId: event.data.requestId }, nativeOrigin);
+    if (event.data?.type === 'guangxuan:studio-timeline-request' && validId(event.data.requestId)) studio?.contentWindow?.postMessage({ type: event.data.type, requestId: event.data.requestId, ...(event.data.seek ? { seek: event.data.seek } : {}) }, nativeOrigin);
+    if (event.data?.type === 'guangxuan:studio-export-checked' && validId(event.data.requestId)) studio?.contentWindow?.postMessage({ type: event.data.type, requestId: event.data.requestId, allowed: event.data.allowed === true, ...(event.data.error ? { error: String(event.data.error).slice(0, 300) } : {}) }, nativeOrigin);
     return;
   }
   if (!studio || event.source !== studio.contentWindow || event.origin !== nativeOrigin || !event.data || typeof event.data !== 'object') return;
   const data = event.data;
   const owner = data.ownerNativeProjectId || data.nativeProjectId;
+  if (data.type === 'guangxuan:studio-edit-range' && owner === nativeProjectId && data.nativeProjectId === nativeProjectId && data.selection?.range) sendParent({ type: data.type, projectId, selection: data.selection });
+  if (data.type === 'guangxuan:studio-import-progress' && owner === nativeProjectId && data.import && typeof data.import === 'object') sendParent({ type: data.type, projectId, import: data.import });
+  if (data.type === 'guangxuan:studio-timeline-result' && validId(data.requestId) && owner === nativeProjectId) sendParent({ type: data.type, projectId, requestId: data.requestId, selection: data.selection, ...(data.error ? { error: String(data.error).slice(0, 300) } : {}) });
+  if (data.type === 'guangxuan:studio-before-export' && validId(data.requestId) && owner === nativeProjectId && Array.isArray(data.specs) && data.specs.length <= 40) sendParent({ type: data.type, projectId, requestId: data.requestId, specs: data.specs });
   if (data.type === 'guangxuan:studio-ready' || data.type === 'guangxuan:studio-project-ready') {
     if (!nativeProjectId || owner !== nativeProjectId) {
       if (visible && !switching) sendParent({ type: 'guangxuan:studio-unexpected-project', projectId });

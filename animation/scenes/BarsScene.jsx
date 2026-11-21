@@ -1,18 +1,18 @@
 import React from 'react';
-import { interpolate, useCurrentFrame } from 'remotion';
-import { Reveal, SceneHeading, SceneShell, clamp, fittedSize, smooth, useSceneStyle } from './shared.jsx';
+import { interpolate } from 'remotion';
+import { Reveal, SceneHeading, SceneShell, clamp, fittedSize, useSceneEasing, useSceneFrame, useSceneStyle } from './shared.jsx';
 
 export function BarsScene(props) {
   const { scene } = props;
   const { width, scale, portrait, palette } = useSceneStyle(props.theme);
-  const frame = useCurrentFrame();
+  const frame = useSceneFrame(), motionEasing = useSceneEasing();
   const maximum = Math.max(1, ...scene.data.map((datum) => Math.abs(datum.value)));
   const hasNegative = scene.data.some((datum) => datum.value < 0);
   return <SceneShell {...props}>
     <SceneHeading scene={scene} width={width} palette={palette} scale={scale} portrait={portrait} />
     <div style={{ display: 'flex', flexDirection: 'column', gap: (portrait ? 31 : 25) * scale }}>
       {scene.data.map((datum, index) => {
-        const extent = interpolate(frame, [20 + index * 5, 54 + index * 5], [0, Math.abs(datum.value) / maximum * (hasNegative ? 50 : 100)], { ...clamp, easing: smooth });
+        const extent = interpolate(frame, [20 + index * 5, 54 + index * 5], [0, Math.abs(datum.value) / maximum * (hasNegative ? 50 : 100)], { ...clamp, easing: motionEasing });
         const tip = hasNegative ? 50 + (datum.value < 0 ? -extent : extent) : extent;
         return <Reveal key={index} delay={11 + index * 4} distance={9 * scale} style={{ display: 'flex', flexDirection: 'column', gap: 12 * scale }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 * scale, alignItems: 'baseline' }}><span style={{ fontSize: fittedSize(datum.label, 25 * scale, width - (portrait ? 220 : 260) * scale, 1, 19 * scale), lineHeight: 1.3 }}>{datum.label}</span><span style={{ fontSize: 29 * scale, fontVariantNumeric: 'tabular-nums', color: palette.muted, fontWeight: 300 }}>{datum.value.toLocaleString('zh-CN', { maximumFractionDigits: 3 })}</span></div>

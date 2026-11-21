@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server.mjs';
+import { writeDesktopRuntime } from '../lib/desktop-session.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dataDir = path.resolve(process.env.GUANGXUAN_USER_DATA || path.join(process.env.LOCALAPPDATA || process.env.APPDATA || ROOT, 'GuangxuanStudio'));
@@ -10,6 +11,7 @@ const stateFile = path.join(dataDir, 'desktop-runtime.json');
 const preferencesFile = path.join(dataDir, 'desktop-preferences.json');
 const instanceId = randomUUID();
 const controlToken = randomUUID();
+const connectionAccessToken = randomBytes(32).toString('base64url');
 let localServer;
 let closing = false;
 
@@ -71,6 +73,7 @@ async function runManagedServer() {
     const candidates = [
       path.join(ROOT, 'bin'),
       path.resolve(ROOT, '..', 'bin'),
+      path.resolve(ROOT, '..', 'Gx-Windows-x64', 'resources', 'bin'),
       path.resolve(ROOT, '..', '光宣工作台-Windows-x64', 'resources', 'bin'),
     ];
     for (const candidate of candidates) {
@@ -79,7 +82,7 @@ async function runManagedServer() {
     }
   }
   const preference = await readPortPreference(preferencesFile);
-  localServer = await listenWithPortPreference(preference, port => startServer({ port, host: '127.0.0.1', dataDir }));
+  localServer = await listenWithPortPreference(preference, port => startServer({ port, host: '127.0.0.1', dataDir, connectionAccessToken }));
   const normalHandlers = localServer.server.listeners('request');
   localServer.server.removeAllListeners('request');
   localServer.server.on('request', (req, res) => {
@@ -103,11 +106,10 @@ async function runManagedServer() {
     }
     for (const handler of normalHandlers) handler.call(localServer.server, req, res);
   });
-  await fs.writeFile(`${stateFile}.tmp`, JSON.stringify({ instanceId, controlToken, url: localServer.url, pid: process.pid, appRoot: ROOT }), { encoding: 'utf8', mode: 0o600 });
-  await fs.rename(`${stateFile}.tmp`, stateFile);
+  await writeDesktopRuntime(stateFile, { instanceId, controlToken, connectionAccessToken, url: localServer.url, pid: process.pid, appRoot: ROOT });
   await fs.writeFile(`${preferencesFile}.tmp`, JSON.stringify({ port: Number(new URL(localServer.url).port) }), { encoding: 'utf8', mode: 0o600 });
   await fs.rename(`${preferencesFile}.tmp`, preferencesFile);
-  if (process.connected) process.send({ type: 'ready', url: localServer.url, instanceId });
+  if (process.connected) process.send({ type: 'ready', url: localServer.url, instanceId, connectionAccessToken });
 } catch (error) {
   if (process.connected) process.send({ type: 'error', message: String(error.message || '本地服务启动失败。') });
   else console.error(String(error.message || '本地服务启动失败。'));

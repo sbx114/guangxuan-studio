@@ -73,6 +73,7 @@ import { homedir, setPriority, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FilmPage, launch } from '../../src/host.mjs';
+import { LOCAL_ONLY } from '../../src/guangxuan.mjs';
 import { alphaCompositeFilter, broken, encoders, FRAMES_709, hardwareEncoder, hardwareOptions, onTheChip, prores709, proresOptions } from '../../src/encoders.mjs';
 import { COMMAND_ROOM, filmSound, filterScriptOption, kill as killProcess, mix, open } from '../../src/shared.mjs';
 import { defaultWorkers, machine } from '../../src/render.mjs';
@@ -161,7 +162,7 @@ export async function exportCapabilities() {
 }
 
 /** 剪映's or CapCut's drafts folder on this computer, or null. @param {'jianying' | 'capcut'} app */
-const defaultDrafts = (app) => draftsRoot(app, { home: homedir(), localAppData: process.env.LOCALAPPDATA, exists: existsSync });
+const defaultDrafts = (app) => LOCAL_ONLY ? null : draftsRoot(app, { home: homedir(), localAppData: process.env.LOCALAPPDATA, exists: existsSync });
 /** Which of 剪映 and CapCut are on this computer (their drafts folders are there): an editing project goes into its drafts. */
 export const draftApps = () => ({ jianying: Boolean(defaultDrafts('jianying')), capcut: Boolean(defaultDrafts('capcut')) });
 

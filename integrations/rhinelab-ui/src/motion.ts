@@ -24,6 +24,18 @@ export function archiveWave(row: number, lane: number, time: number) {
         (1 - smooth((t - 3.5) / 0.85)))
   );
 }
+
+export const ENTRY_WAVE_DURATION = 2.15;
+/** One whole-array greeting, using the original continuous crest and return. */
+export function entryWave(rowOffset: number, laneOffset: number, age: number) {
+  // Give the prepared overview a moment to appear before the wave travels.
+  // archiveWave's quintic envelopes make both endpoints exactly stationary.
+  const delay = 0.15;
+  if (age <= delay || age >= ENTRY_WAVE_DURATION) return 0;
+  const time = 22 + (age - delay) / (ENTRY_WAVE_DURATION - delay) * 4.35;
+  return 0.3 * archiveWave(rowOffset + 12, laneOffset + 2, time);
+}
+
 export function extraction(time: number) {
   return (
     0.4 * smooth((time - 25.58) / 0.82) + 2.95 * smooth((time - 27.55) / 1.3)

@@ -110,11 +110,10 @@ export class ModelViewer {
       <div class="scene-atmosphere viewer-atmosphere" aria-hidden="true"></div>
       <header class="viewer-header">
         <button class="viewer-back" data-viewer="close">← <span>返回档案</span><kbd>ESC</kbd></button>
-        <div class="viewer-heading"><span>GUANGXUAN / OBJECT STUDY</span><h2 id="viewer-title">档案模型</h2><p id="viewer-file"></p></div>
-        <span class="viewer-index">360<span>°</span></span>
+        <div class="viewer-heading"><h2 id="viewer-title">档案模型</h2><p id="viewer-file" hidden aria-hidden="true"></p></div>
       </header>
       <div class="viewer-surface" role="group" aria-label="玻璃模式"><button data-viewer="clear" aria-pressed="true">清晰</button><button data-viewer="frosted" aria-pressed="false">磨砂</button></div>
-      <aside class="viewer-parts" aria-label="模型装配结构"><div>ASSEMBLY / 装配结构</div>${PARTS.map((p, i) => `<p><span>${String(i + 1).padStart(2, "0")}</span><strong>${p.label}</strong><small>${p.en}</small></p>`).join("")}</aside>
+      <aside class="viewer-parts" aria-label="模型装配结构"><div>装配结构</div>${PARTS.map((p, i) => `<p><span>${String(i + 1).padStart(2, "0")}</span><strong>${p.label}</strong></p>`).join("")}</aside>
       <div class="viewer-loading" role="status"><span>正在载入模型…</span><button data-viewer="retry" hidden>重新载入 ↗</button></div>
       <footer class="viewer-footer">
         <div class="viewer-help"><span>拖动旋转</span><span>↑ ↓ ← → 平移</span><span>滚轮缩放</span></div>
@@ -245,8 +244,8 @@ export class ModelViewer {
     this.root.hidden = false;
     this.root.dataset.transition = "opening";
     this.root.querySelector("#viewer-title")!.textContent = title;
-    this.root.querySelector("#viewer-file")!.textContent =
-      "FILE " + id + " / INTERNAL DATABASE";
+    this.root.dataset.projectId = id;
+    this.root.querySelector("#viewer-file")!.textContent = "";
     this.spread = { value: 0, velocity: 0 };
     this.targetSpread = 0;
     this.clarity = { value: 1, velocity: 0 };

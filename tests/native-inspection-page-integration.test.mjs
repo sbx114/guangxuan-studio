@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createProjectStore } from '../lib/store.mjs';
+import { createVideoService } from '../lib/video.mjs';
+import { createOpenFilmManager } from '../lib/openfilm.mjs';
+import { filmHtml, readFilmFile } from '../integrations/openfilm/packages/openfilm/src/film-doc.mjs';
+
+const execute = promisify(execFile), root = path.resolve(import.meta.dirname, '..');
+const binary = name => process.env['GUANGXUAN_' + name.toUpperCase()] || (process.env.GUANGXUAN_BIN_DIR ? path.join(process.env.GUANGXUAN_BIN_DIR, name + (process.platform === 'win32' ? '.exe' : '')) : name);
+
+test('real manager inspects clip 301 of a thousand-clip film and uses its stable ID for a scoped source trim', { skip: process.env.GUANGXUAN_TEST_OPENFILM !== '1', timeout: 90000 }, async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'gx-native-page-')), dataDir = path.join(directory, 'data'), source = path.join(directory, 'synthetic-source.mp4');
+  let store, videoService, manager;
+  t.after(async () => { await manager?.close(); await videoService?.close(); await store?.settle(); assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir())); assert.ok(path.basename(directory).startsWith('gx-native-page-')); await rm(directory, { recursive: true, force: true }); });
+  await execute(binary('ffmpeg'), ['-v', 'error', '-nostdin', '-f', 'lavfi', '-i', 'testsrc2=s=160x90:r=15:d=2', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', source], { windowsHide: true, timeout: 30000 });
+  store = await createProjectStore(dataDir); videoService = await createVideoService({ dataDir, root, ffmpegPath: binary('ffmpeg'), ffprobePath: binary('ffprobe') });
+  const asset = await videoService.importLocalFile(source), projectId = 'thousand-native-clips', origin = 'http://127.0.0.1:49741';
+  await store.save(projectId, { kind: 'video', title: 'Isolated native pagination fixture', video: { timeline: [{ assetId: asset.id, start: 0, end: 1 }], captions: [], aspect: '16:9', resolution: '720' } });
+  manager = await createOpenFilmManager({ dataDir, root, store, resolveAsset: id => videoService.resolveAsset(id), registerOwnedAsset: (...args) => videoService.registerOwnedAsset(...args) });
+  await manager.context(projectId, origin);
+  const filmFile = path.join(dataDir, 'openfilm/projects', projectId, 'film.html'), original = readFilmFile(await readFile(filmFile, 'utf8')).doc;
+  const sourceClip = original.tracks.flatMap(track => track.clips).find(clip => /\.mp4$/i.test(clip.src)); assert.ok(sourceClip);
+  const doc = { ...original, tracks: [{ clips: Array.from({ length: 1000 }, (_, index) => ({ ...structuredClone(sourceClip), id: 'paged-clip-' + (index + 1), at: index, time: [0, 1] })) }] };
+  await writeFile(filmFile, filmHtml(doc));
+  const serializedBefore = readFilmFile(await readFile(filmFile, 'utf8')).doc;
+  const legacy = await manager.context(projectId, origin); assert.equal(legacy.editorTimeline.clips.length, 300); assert.equal(legacy.editorTimeline.pagination.total, 1000); assert.equal(legacy.editorTimeline.nextOffset, 300);
+  const page = await manager.context(projectId, origin, { inspection: { offset: 300, limit: 5 } }), target = page.editorTimeline.clips[0]; assert.equal(target.clipId, 'paged-clip-301'); assert.equal(target.assetId, page.assets[0].id); assert.equal(page.editorTimeline.pagination.total, 1000);
+  const scope = { assetIds: [target.assetId], placement: { mode: 'range', start: 300, end: 301, clipIds: [target.clipId] } };
+  const scoped = await manager.context(projectId, origin, { editScope: scope, inspection: {} }); assert.deepEqual(scoped.editorTimeline.clips.map(clip => clip.id), ['paged-clip-301']); assert.equal(scoped.editorTimeline.pagination.total, 1);
+  const changed = await manager.adjustClips(projectId, [{ action: 'trim', clipId: target.clipId, start: .1, end: .8 }], origin, scoped.revision, { editScope: scope });
+  assert.notEqual(changed.revision, scoped.revision);
+  const after = readFilmFile(await readFile(filmFile, 'utf8')).doc; assert.deepEqual(after.tracks[0].clips[300].time, [.1, .8]); assert.equal(after.tracks[0].clips[300].at, 300);
+  for (let index = 0; index < 1000; index++) if (index !== 300) assert.deepEqual(after.tracks[0].clips[index], serializedBefore.tracks[0].clips[index]);
+  await assert.rejects(manager.adjustClips(projectId, [{ action: 'volume', clipId: target.clipId, value: .4 }], origin, scoped.revision, { editScope: scope }), { code: 'OPENFILM_REVISION_CONFLICT' });
+  const cancel = new AbortController(); cancel.abort(); await assert.rejects(manager.adjustClips(projectId, [{ action: 'volume', clipId: target.clipId, value: .4 }], origin, changed.revision, { editScope: scope, signal: cancel.signal }), { code: 'REQUEST_CANCELLED' });
+});

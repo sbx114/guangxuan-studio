@@ -94,7 +94,7 @@ export function normalizeQuality(
   value: unknown,
   legacyHigh = true,
 ): RenderQuality {
-  const base = qualityPresets.balanced;
+  const base = qualityPresets.original;
   const v =
     value && typeof value === "object"
       ? (value as Record<string, unknown>)

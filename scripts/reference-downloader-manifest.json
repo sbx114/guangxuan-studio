@@ -1,0 +1,19 @@
+{
+  "name": "yt-dlp",
+  "version": "2026.10.26",
+  "platform": "win32-x64",
+  "filename": "yt-dlp.exe",
+  "bytes": 23575744,
+  "sha256": "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d",
+  "downloadUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe",
+  "checksumsUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/SHA2-256SUMS",
+  "checksumsSha256": "0d7ec4303a02bcbe66154d478852cdf2e07688d39dc4597316e4424ac4e74356",
+  "releaseUrl": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26",
+  "sourceUrl": "https://github.com/yt-dlp/yt-dlp/tree/2026.10.26",
+  "sourceArchiveUrl": "https://github.com/yt-dlp/yt-dlp/archive/refs/tags/2026.10.26.tar.gz",
+  "sourceLicense": "Unlicense",
+  "standaloneBinaryLicense": "GPL-3.0-or-later",
+  "licensingDocumentation": "https://github.com/yt-dlp/yt-dlp/tree/2026.10.26#licensing",
+  "gplLicenseUrl": "https://www.gnu.org/licenses/gpl-3.0.txt",
+  "usage": "Metadata extraction for public single-video YouTube/Bilibili URLs only. No user cookies, login, config, plugins, remote components, playlists or media downloads by yt-dlp."
+}

@@ -3,6 +3,8 @@ import { openSync, closeSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readDesktopRuntime } from '../lib/desktop-session.mjs';
+import { ensureDistributionRuntime } from '../lib/distribution-runtime.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
@@ -22,7 +24,7 @@ async function installedEdge() {
 
 async function existingService() {
   try {
-    const state = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+    const state = await readDesktopRuntime(stateFile);
     const url = new URL(state.url);
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !['4317', '4417'].includes(url.port)) return null;
     const status = await (await fetch(`${url.origin}/api/desktop/status`, { signal: AbortSignal.timeout(1800) })).json();
@@ -41,6 +43,8 @@ async function stopService(state) {
 
 async function startService() {
   await fs.mkdir(dataDir, { recursive: true });
+  const bin = await ensureDistributionRuntime({ root: ROOT, dataDir });
+  if (bin) { process.env.GUANGXUAN_BIN_DIR = bin; process.env.GUANGXUAN_REMOTION_BIN_DIR = path.join(path.dirname(bin), 'compositor'); }
   const log = openSync(path.join(dataDir, 'desktop-server.log'), 'a');
   const child = fork(path.join(HERE, 'local-server.mjs'), [], {
     execPath: process.execPath, execArgv: [], cwd: ROOT,
@@ -76,6 +80,17 @@ export async function resolveLaunchService(healthyService, startNewService = sta
   return startNewService();
 }
 
+export function connectionLaunchUrl(state) {
+  const url = new URL(state.url);
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !['4317', '4417'].includes(url.port) || url.username || url.password) throw new Error('本地服务地址不正确。');
+  if (typeof state.connectionAccessToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state.connectionAccessToken)) throw new Error('请重新启动 Gx 本地服务，以启用密钥保存。');
+  const launch = new URL(url.origin);
+  // Fragments do not enter HTTP requests, referrers, or server logs. The
+  // client consumes this independent capability before removing the fragment.
+  launch.hash = `gx-connection-session=${state.connectionAccessToken}`;
+  return launch;
+}
+
 async function runLauncher() {
  try {
   if (process.platform !== 'win32') throw new Error('此启动入口用于 Windows；其他系统请使用 node server.mjs。');
@@ -84,22 +99,21 @@ async function runLauncher() {
   if (process.argv.includes('--check')) {
     await installedEdge();
     await fs.access(path.join(ROOT, 'node_modules', '@remotion', 'renderer'));
-    console.log(JSON.stringify({ node: process.versions.node, edgeInstalled: true, renderingDependencies: true, running: state?.url || null }));
+    console.log(JSON.stringify({ node: process.versions.node, edgeInstalled: true, renderingDependencies: true, running: state ? new URL(state.url).origin : null }));
   } else if (process.argv.includes('--stop')) {
     await stopService(state);
-    console.log(state ? '光宣工作台本地服务已停止。' : '光宣工作台本地服务当前未运行。');
+    console.log(state ? 'Gx 本地服务已停止。' : 'Gx 本地服务当前未运行。');
   } else {
     const edge = await installedEdge();
     state = await resolveLaunchService(state);
-    const url = new URL(state.url);
-    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !['4317', '4417'].includes(url.port)) throw new Error('本地服务地址不正确。');
+    const url = connectionLaunchUrl(state);
     const edgeWindow = spawn(edge, [
-      `--app=${url.origin}`, `--user-data-dir=${path.join(dataDir, 'browser-profile')}`,
+      `--app=${url.href}`, `--user-data-dir=${path.join(dataDir, 'browser-profile')}`,
       '--window-size=1460,960', '--no-first-run', '--no-default-browser-check',
     ], { detached: true, stdio: 'ignore', windowsHide: false });
     await new Promise((resolve, reject) => { edgeWindow.once('spawn', resolve); edgeWindow.once('error', () => reject(new Error('无法打开 Edge 应用窗口。'))); });
     edgeWindow.unref();
-    console.log(`光宣工作台已打开独立窗口。本地服务：${url.origin}`);
+    console.log(`Gx 已打开独立窗口。本地服务：${url.origin}`);
   }
 } catch (error) {
   console.error(`启动失败：${String(error.message || error)}`);

@@ -1,18 +1,32 @@
 /* Integration-only copy and controls. Original scene, layout and motion remain. */
 .powered{display:none!important}
 .brand h1{font-size:43px;letter-spacing:0;font-weight:750}
+.brand h1.gx-archive-brand{width:74px;height:74px;margin:0;line-height:0;filter:drop-shadow(0 5px 12px #7468500a)}
+.brand h1.gx-archive-brand svg{display:block;width:100%;height:100%}
 .brand>div{font-size:19px;letter-spacing:4px;line-height:25px}
+.brand>[hidden]{display:none!important}
 .brand p{font-size:33px}
 .brand-analysis{width:189px}
 .brand p b{font-size:30px}
 .welcome-company{font-size:80px}
 .system-nav{gap:35px}
+[data-layout="portrait"] .system-nav{gap:8px;max-width:calc(100vw - 100px);flex-wrap:wrap;justify-content:flex-end}
+[data-layout="portrait"] .system-nav button{min-width:30px}
+.project-tools-launch{min-height:44px;font:inherit;color:inherit;text-align:left;border-bottom:1px solid #b5b7a4;padding:9px 0}
 .system-nav button{font-size:14px}
 .system-nav [data-action="projects"] span[hidden]{display:none}
 .system-footer>span:first-child{letter-spacing:1px}
 .system-footer>span:nth-child(2){justify-content:flex-end}
-.file-summary{font-size:19px}
-.file-summary>span:last-child{font-size:12px}
+.archive-callout .eyebrow>span{margin-left:0}
+.archive-callout .file-title{width:min(720px,calc(100% - 65px));padding-right:4px;font-size:36px;line-height:1.3;text-align:left}
+.file-title #selected-title{flex:1 1 0;min-width:0;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.file-title #selected-title>.rn-value{display:block;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.file-title #selected-title.is-truncated>.rn-value{color:inherit}
+.file-title #selected-title.is-truncated>.rn-visual{visibility:hidden}
+.archive-callout .file-open{flex:none;margin-left:12px;opacity:.6}
+.archive-callout .callout-rule{margin-top:32px}
+.archive-callout .read-file{margin-top:30px}
+.file-title>[hidden],.file-summary[hidden],#hover-code[hidden],#column-number[hidden],#object-id[hidden],#viewer-file[hidden]{display:none!important}
 .read-file{font-family:MiSans,sans-serif;letter-spacing:2px}
 .archive-hint{font-size:11px}
 .settings-intro:empty,.detail-footnote,.detail-actions [data-action="bookmark"]{display:none}
@@ -23,7 +37,9 @@
 #stage[data-mode="boot"] #skip{display:block!important;visibility:visible!important;opacity:1!important;z-index:90;pointer-events:auto;right:60px;top:50px;bottom:auto;background:#eeeae0cc;border:1px solid #b7b6a7;padding:13px 18px;font-size:16px}
 #stage[data-mode="boot"] .brand{pointer-events:none}
 [data-layout="compact"] .system-nav,[data-layout="portrait"] .system-nav{gap:13px}
+[data-layout="compact"] .brand h1.gx-archive-brand,[data-layout="portrait"] .brand h1.gx-archive-brand{width:52px;height:52px}
 [data-layout="compact"] .system-nav button,[data-layout="portrait"] .system-nav button{font-size:12px;min-width:36px;min-height:40px}
+:is([data-layout="compact"],[data-layout="portrait"]) .archive-callout .file-title{width:100%;font-size:23px}
 [data-layout="portrait"] .system-nav [data-action="search"]{font-size:12px}
 [data-layout="portrait"] .brand>div{letter-spacing:2px}
 @media(prefers-reduced-motion:reduce){#stage .portal-launch{transition:none}}
@@ -50,7 +66,6 @@
 .project-save:disabled,.project-details-form .solid-button:disabled{opacity:.5;cursor:default}
 .project-save-status{font-size:16px;min-height:24px;margin:0;color:#5d6d46;line-height:1.6}
 .project-save-status.is-error{color:#a0513e}
-.project-record-id{font-size:11px;letter-spacing:.4px;color:#868d79;overflow-wrap:anywhere;margin-top:17px}
 [data-layout="compact"] .project-details-form,[data-layout="portrait"] .project-details-form{gap:13px;margin-top:17px}
 [data-layout="compact"] .project-details-form>label,[data-layout="portrait"] .project-details-form>label{font-size:12px}
 [data-layout="compact"] .project-details-form input,[data-layout="compact"] .project-details-form textarea,[data-layout="portrait"] .project-details-form input,[data-layout="portrait"] .project-details-form textarea{font-size:14px;padding:8px 10px}

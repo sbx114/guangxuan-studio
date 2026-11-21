@@ -1,18 +1,22 @@
-const VIEWS = new Set(['video', 'writer', 'archive', 'settings']);
+const VIEWS = new Set(['video', 'writer', 'science', 'archive', 'settings', 'tasks', 'restore', 'tools', 'assistant']);
+const COVERS = new Set(['classic', 'blueprint', 'film', 'paper', 'custom']);
+const coverAssetId = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value.toLowerCase() : '';
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 
 export function rhineCommand(data, origin, source, expectedOrigin, expectedSource) {
   if (!expectedSource || origin !== expectedOrigin || source !== expectedSource || !data || typeof data !== 'object') return null;
   if (data.type === 'guangxuan:ready') return { type: 'ready' };
-  if (data.type === 'guangxuan:new-project') return { type: 'new-project' };
+  if (data.type === 'guangxuan:new-project') return { type: 'new-project', ...(['video', 'writing', 'science'].includes(data.kind) ? { kind: data.kind } : {}) };
   if (data.type === 'guangxuan:edit-project' && validId(data.projectId)) return { type: 'edit-project', projectId: data.projectId };
   if (data.type === 'guangxuan:update-project' && validId(data.projectId) && validId(data.requestId)) {
     const title = typeof data.title === 'string' ? data.title.trim() : '';
     const description = typeof data.description === 'string' ? data.description.trim() : '';
+    const invalidCover = (data.cover !== undefined && !COVERS.has(data.cover)) || (data.coverAssetId !== undefined && data.coverAssetId !== '' && !coverAssetId(data.coverAssetId)) || (data.cover === 'custom' && !coverAssetId(data.coverAssetId));
     return { type: 'update-project', projectId: data.projectId, requestId: data.requestId, title, description,
-      ...(!title || title.length > 120 || description.length > 1000 ? { error: '名称需为1—120字，简介最多1000字。' } : {}) };
+      ...(data.cover !== undefined ? { cover: data.cover } : {}), ...(data.coverAssetId !== undefined ? { coverAssetId: coverAssetId(data.coverAssetId) } : {}),
+      ...(!title || title.length > 120 || description.length > 1000 ? { error: '名称需为1—120字，简介最多1000字。' } : invalidCover ? { error: '请重新选择有效封面。' } : {}) };
   }
-  if (data.type === 'guangxuan:home-state' && ['archive', 'detail'].includes(data.mode)) return { type: 'home-state', mode: data.mode, projectId: validId(data.projectId) ? data.projectId : null };
+  if (data.type === 'guangxuan:home-state' && ['archive', 'detail'].includes(data.mode)) return { type: 'home-state', mode: data.mode, projectId: validId(data.projectId) ? data.projectId : null, ...(['video', 'writer', 'science'].includes(data.workspace) ? { workspace: data.workspace } : {}) };
   if (data.type !== 'guangxuan:open' || !VIEWS.has(data.view)) return null;
   return { type: 'open', view: data.view };
 }
@@ -20,7 +24,9 @@ export function rhineCommand(data, origin, source, expectedOrigin, expectedSourc
 export function publicProjectSummary(project) {
   const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
   const count = value => Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 0);
-  return { id: project.id, title: text(project.title, 120), kind: project.kind === 'video' ? 'video' : 'writing',
+  const assetId = coverAssetId(project.coverAssetId);
+  return { id: project.id, title: text(project.title, 120), kind: ['video', 'writing', 'science'].includes(project.kind) ? project.kind : 'writing',
+    cover: COVERS.has(project.cover) ? project.cover : 'classic', coverAssetId: assetId, coverUrl: assetId ? `/api/project-covers/${assetId}` : '',
     description: text(project.description, 1000), createdAt: text(project.createdAt, 64), updatedAt: text(project.updatedAt, 64),
     duration: project.duration == null ? null : count(project.duration), clipCount: count(project.clipCount), wordCount: count(project.wordCount), outputCount: count(project.outputCount) };
 }
@@ -56,9 +62,9 @@ export function mountRhineHome(container, { skipBoot = false, onOpen, onReady, o
     if (!command || disposed) return;
     if (command.type === 'ready') return ready();
     if (command.type === 'open') return onOpen?.(command.view);
-    if (command.type === 'new-project') return onNewProject?.();
+    if (command.type === 'new-project') return onNewProject?.(command.kind);
     if (command.type === 'edit-project') return onEditProject?.(command.projectId);
-    if (command.type === 'home-state') return onState?.(command);
+    if (command.type === 'home-state') { selection = null; return onState?.(command); }
     if (command.type === 'update-project') {
       if (command.error) send({ type: 'guangxuan:project-updated', requestId: command.requestId, projectId: command.projectId, error: command.error });
       else onUpdateProject?.(command);

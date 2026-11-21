@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, net } = require('electron');
 const fs = require('node:fs/promises');
 const { createWriteStream, mkdirSync } = require('node:fs');
 const { Readable } = require('node:stream');
@@ -7,18 +7,19 @@ const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
-app.setName('Guangxuan Studio');
-if (process.env.GUANGXUAN_USER_DATA) {
-  const selectedDataDirectory = path.resolve(process.env.GUANGXUAN_USER_DATA);
-  mkdirSync(selectedDataDirectory, { recursive: true });
-  app.setPath('userData', selectedDataDirectory);
-}
+// Keep the existing profile when the visible product name changes.
+const selectedDataDirectory = path.resolve(process.env.GUANGXUAN_USER_DATA ||
+  path.join(app.getPath('appData'), 'Guangxuan Studio'));
+mkdirSync(selectedDataDirectory, { recursive: true });
+app.setPath('userData', selectedDataDirectory);
+app.setName('Gx');
 if (process.platform === 'win32') app.setAppUserModelId('studio.guangxuan.desktop');
 
 let mainWindow = null;
 let localServer = null;
 let expectedOrigin = null;
 let isQuitting = false;
+let preparingRuntime = false;
 const hasInstanceLock = app.requestSingleInstanceLock();
 
 function configurationPath() {
@@ -68,7 +69,7 @@ function registerIPC() {
     return handler(value);
   });
   handle('gx:app-info', () => ({
-    name: '光宣工作台', version: app.getVersion(), platform: process.platform,
+    name: 'Gx', version: app.getVersion(), platform: process.platform,
     desktop: true, encryptionAvailable: safeStorage.isEncryptionAvailable(),
   }));
   handle('gx:load-connection', () => readConnection());
@@ -108,7 +109,7 @@ function registerIPC() {
   handle('gx:save-export', async ({ exportId, name } = {}) => {
     if (typeof exportId !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(exportId))
       throw new Error('导出任务标识不正确。');
-    const baseName = path.basename(String(name || '光宣工作台成片.mp4'))
+    const baseName = path.basename(String(name || 'Gx成片.mp4'))
       .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\.mp4$/i, '').slice(0, 170) + '.mp4';
     const selected = await dialog.showSaveDialog(mainWindow, {
       title: '保存导出视频', defaultPath: path.join(app.getPath('downloads'), baseName),
@@ -134,7 +135,7 @@ function registerIPC() {
   handle('gx:save-file', async (file = {}) => {
     if (typeof file.content !== 'string' || file.content.length > 90 * 1024 * 1024)
       throw new Error('导出内容为空或超过大小限制。');
-    const name = path.basename(String(file.name || '光宣工作台导出.txt'))
+    const name = path.basename(String(file.name || 'Gx导出.txt'))
       .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 180);
     const filters = Array.isArray(file.filters) ? file.filters.slice(0, 6).map((filter) => ({
       name: String(filter.name || '文件').slice(0, 30),
@@ -164,9 +165,9 @@ function openExternal(rawUrl) {
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    title: '光宣工作台', width: 1460, height: 960, minWidth: 1040, minHeight: 720,
-    show: false, autoHideMenuBar: true, backgroundColor: '#f5f6f3',
-    icon: path.join(__dirname, 'icon.png'),
+    title: 'Gx', width: 1460, height: 960, minWidth: 1040, minHeight: 720,
+    show: false, autoHideMenuBar: true, backgroundColor: '#f4f0e7',
+    icon: path.join(__dirname, process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
@@ -176,6 +177,7 @@ async function createWindow() {
   });
   mainWindow.removeMenu();
   const contents = mainWindow.webContents;
+  contents.on('page-title-updated', (event) => event.preventDefault());
   contents.session.setPermissionRequestHandler((wc, permission, callback) => {
     callback(wc === contents && permission === 'clipboard-sanitized-write');
   });
@@ -192,6 +194,40 @@ async function createWindow() {
   await mainWindow.loadURL(localServer.url);
 }
 
+async function prepareDistributionRuntime() {
+  if (process.platform !== 'win32') return null;
+  const { ensureDistributionRuntime } = await import(pathToFileURL(path.join(__dirname, '..', 'lib', 'distribution-runtime.mjs')).href);
+  let preparationWindow = null, lastUpdate = 0, finished = false;
+  preparingRuntime = true;
+  const showProgress = (progress) => {
+    if (progress.complete) return;
+    if (!preparationWindow) {
+      preparationWindow = new BrowserWindow({ title: 'Gx · 准备视频工具', width: 520, height: 260, resizable: false, autoHideMenuBar: true,
+        backgroundColor: '#f4f0e7', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+      preparationWindow.removeMenu();
+      preparationWindow.on('closed', () => { preparationWindow = null; if (!finished) app.quit(); });
+    }
+    if (Date.now() - lastUpdate < 800) return;
+    lastUpdate = Date.now();
+    const percent = progress.total ? Math.min(100, Math.round(progress.received / progress.total * 100)) : 0;
+    const size = (progress.received / 1024 / 1024).toFixed(1);
+    const label = progress.label === 'yt-dlp.exe' ? '视频网址工具' : progress.label === 'Remotion' ? '动画运行组件' : 'FFmpeg';
+    const html = `<html lang="zh-CN"><meta charset="utf-8"><style>body{font:16px 'Segoe UI',sans-serif;margin:34px;background:#f4f0e7;color:#51493e}h2{font-size:21px;margin:0 0 18px}p{line-height:1.6;font-size:14px}.bar{height:6px;background:#e0d8ca;border-radius:3px;margin:22px 0 12px}.fill{height:6px;background:#857354;border-radius:3px;width:${percent}%}</style><h2>首次启动，准备视频工具</h2><p>从官方来源下载并校验。完成后可离线使用已有素材。</p><div class="bar"><div class="fill"></div></div><p>${label} · ${size} MB${progress.total ? ' · ' + percent + '%' : ''}</p></html>`;
+    void preparationWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  };
+  try {
+    while (true) {
+      try {
+        const bin = await ensureDistributionRuntime({ root: path.join(__dirname, '..'), dataDir: app.getPath('userData'), fetchImpl: (url, options) => net.fetch(url, options), onProgress: showProgress });
+        finished = true; return { bin, close: () => { preparingRuntime = false; preparationWindow?.close(); } };
+      } catch (error) {
+        const result = await dialog.showMessageBox(preparationWindow || undefined, { type: 'error', title: '视频工具准备未完成', message: '请检查网络连接后重试。', detail: String(error.message || '下载未完成。').slice(0, 250), buttons: ['重试', '退出'], defaultId: 0, cancelId: 1 });
+        if (result.response !== 0) { finished = true; preparingRuntime = false; preparationWindow?.close(); app.exit(0); return null; }
+      }
+    }
+  } catch (error) { preparingRuntime = false; throw error; }
+}
+
 if (!hasInstanceLock) {
   app.quit();
 } else {
@@ -202,11 +238,9 @@ if (!hasInstanceLock) {
     mainWindow.focus();
   });
   app.whenReady().then(async () => {
-    if (!process.env.GUANGXUAN_BIN_DIR) {
-      const binaryDirectory = app.isPackaged ? path.join(process.resourcesPath, 'bin') : path.join(__dirname, '..', 'bin');
-      try { await fs.access(binaryDirectory); process.env.GUANGXUAN_BIN_DIR = binaryDirectory; }
-      catch { /* A source checkout may provide FFmpeg through PATH instead. */ }
-    }
+    const runtime = await prepareDistributionRuntime();
+    if (process.platform === 'win32' && !runtime) return;
+    if (runtime?.bin) { process.env.GUANGXUAN_BIN_DIR = runtime.bin; process.env.GUANGXUAN_REMOTION_BIN_DIR = path.join(path.dirname(runtime.bin), 'compositor'); }
     const serverModule = await import(pathToFileURL(path.join(__dirname, '..', 'server.mjs')).href);
     localServer = await serverModule.startServer({
       port: 0, host: '127.0.0.1', dataDir: app.getPath('userData'),
@@ -214,12 +248,13 @@ if (!hasInstanceLock) {
     expectedOrigin = new URL(localServer.url).origin;
     registerIPC();
     await createWindow();
+    runtime?.close();
   }).catch(() => {
-    dialog.showErrorBox('光宣工作台启动失败', '应用未能启动本地工作服务。请确认程序已完整解压，再重新打开。');
+    dialog.showErrorBox('Gx 启动失败', '应用未能启动本地工作服务。请确认程序已完整解压，再重新打开。');
     app.exit(1);
   });
   app.on('activate', () => { if (!mainWindow && localServer) void createWindow(); });
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  app.on('window-all-closed', () => { if (!preparingRuntime && process.platform !== 'darwin') app.quit(); });
   app.on('before-quit', (event) => {
     if (isQuitting || !localServer) return;
     event.preventDefault();

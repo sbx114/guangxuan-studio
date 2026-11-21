@@ -1,0 +1,116 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import http from 'node:http';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { startServer } from '../server.mjs';
+import { hydratePlayableNovel, serializePlayableNovel } from '../lib/visual-novel.mjs';
+import { singleGuideFixture } from './fixtures/single-guide.mjs';
+
+test('shared library drives single-person single-scene HTTP generation without project resource snapshots', { timeout: 120000 }, async t => {
+  const bin = process.env.GUANGXUAN_BIN_DIR;
+  if (!bin) { t.skip('Set GUANGXUAN_BIN_DIR to a local FFmpeg runtime.'); return; }
+  const parent = path.resolve(process.env.GUANGXUAN_TEST_DIR || os.tmpdir());
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(path.join(parent, 'gx-shared-guide-'));
+  let app, received, calls = 0, mode = 'ok';
+  const provider = http.createServer(async (req, res) => {
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    received = JSON.parse(Buffer.concat(chunks).toString('utf8')); calls++;
+    const user = JSON.parse(received.messages[1].content);
+    const value = singleGuideFixture({ document: user['所选资料'], config: user['创作设置'] });
+    if (mode === 'bad-citation') value.scenes[0].lines[1].citations[0].quote = '这句话没有在所选资料中出现。';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }] }));
+  });
+  await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await app?.close(); provider.closeAllConnections(); await new Promise(resolve => provider.close(resolve));
+    assert.ok(directory.startsWith(parent + path.sep) && path.basename(directory).startsWith('gx-shared-guide-'));
+    if (process.env.GUANGXUAN_KEEP_VN_TESTS !== '1') await rm(directory, { recursive: true, force: true });
+  });
+  app = await startServer({ dataDir: path.join(directory, 'data') });
+  async function api(route, body, { method = body === undefined ? 'GET' : 'POST', status = 200, raw = false, headers } = {}) {
+    const response = await fetch(app.url + route, { method, ...(body === undefined ? {} : { headers: headers || { 'content-type': 'application/json' }, body: raw ? body : JSON.stringify(body) }) });
+    const bytes = Buffer.from(await response.arrayBuffer());
+    let value; try { value = JSON.parse(bytes.toString('utf8')); } catch { value = bytes; }
+    assert.equal(response.status, status, route + ': ' + (Buffer.isBuffer(value) ? 'binary response' : JSON.stringify(value)));
+    return value;
+  }
+  const project = name => ({ kind: 'science', title: name, source: { title: '', text: '', url: '' }, facts: [], brief: {}, science: {} });
+  await api('/api/projects/guide-a', project('第一个讲解项目'), { method: 'PUT' });
+  await api('/api/projects/guide-b', project('第二个讲解项目'), { method: 'PUT' });
+  const source = '# 实验设计\n对照实验需要只改变待研究的因素，并保持其他条件相同。结论需要说明适用条件，不能把类比直接当成真实机制。\n\n# 未选择页段\nUNSELECTED_SOURCE_429不能发送给模型。';
+  const docA = (await api('/api/projects/guide-a/science-documents/text', { title: '实验设计材料', text: source }, { status: 201 })).document;
+  const docB = (await api('/api/projects/guide-b/science-documents/text', { title: '实验设计材料B', text: source }, { status: 201 })).document;
+  const image = color => execFileSync(path.join(bin, 'ffmpeg.exe'), ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=' + color + ':s=96x160', '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1'], { windowsHide: true });
+  const upload = (kind, color) => api('/api/novel-library/assets/upload', image(color), { status: 201, raw: true, headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(kind + '.png'), 'x-asset-kind': kind } });
+  const bg = (await upload('background', '0x789e9c')).asset;
+  const face = (await upload('portrait', '0x8c91b3')).asset;
+  const think = (await upload('portrait', '0xd8a27a')).asset;
+  const character = (await api('/api/novel-library/characters', { name: '讲解人物', role: 'ROLE_MARKER实验课助教', tone: 'TONE_MARKER亲切简练', personality: 'PERSONALITY_MARKER耐心严谨', portraits: [{ id: 'explain', name: '讲解', assetId: face.id }, { id: 'think', name: '思考', assetId: think.id }] })).character;
+  const background = (await api('/api/novel-library/backgrounds', { name: '我选的场景', assetId: bg.id, fit: 'contain' })).background;
+  await api('/api/novel-library/characters', { name: 'UNSELECTED_CHARACTER_429', portraits: [] });
+  const selection = { characterId: character.id, backgroundId: background.id };
+  const settings = { baseUrl: 'http://127.0.0.1:' + provider.address().port, apiKey: 'fixture-shared-only', model: 'fixture', apiStyle: 'chat' };
+  function ask(projectId, doc, density) {
+    return { task: 'visual-novel', settings, payload: { projectId, librarySelection: { ...selection }, documentSelection: { documentId: doc.id, unitIds: [doc.units[0].id] }, document: { text: 'FORGED_SOURCE' }, assetCatalog: { items: [{ id: 'FORGED_ASSET' }] }, config: { interactionDensity: density, instruction: '把条件讲清楚', sceneCount: 24, chapterCount: 6, questionCount: 99, audience: 'UNUSED_AUDIENCE', characters: [{ name: 'FORGED_PERSONA' }] } } };
+  }
+  const generated = (await api('/api/ai', ask('guide-a', docA, 'sparse'))).data;
+  assert.equal(received.max_tokens, 16384);
+  const sent = JSON.parse(received.messages[1].content);
+  assert.equal(sent['创作设置'].sceneCount, 1); assert.equal(sent['创作设置'].chapterCount, 1);
+  assert.equal(sent['创作设置'].interactionDensity, 'sparse');
+  assert.equal(sent['创作设置'].characters.length, 1); assert.equal(sent['创作设置'].backgrounds.length, 1);
+  assert.ok(received.messages[1].content.includes('ROLE_MARKER'));
+  assert.ok(received.messages[1].content.includes('TONE_MARKER'));
+  assert.ok(received.messages[1].content.includes('PERSONALITY_MARKER'));
+  for (const hidden of ['UNSELECTED_SOURCE_429', 'UNSELECTED_CHARACTER_429', 'FORGED_SOURCE', 'FORGED_ASSET', 'FORGED_PERSONA', 'UNUSED_AUDIENCE']) assert.ok(!received.messages[1].content.includes(hidden));
+  assert.equal(sent['创作设置'].questionCount, undefined);
+  assert.equal(generated.version, 2); assert.equal(generated.chapters.length, 1); assert.equal(generated.scenes.length, 1);
+  assert.equal(generated.scenes[0].actors.length, 1);
+  assert.deepEqual(generated.scenes[0].lines.filter(line => line.question).map(line => line.question.choices.length), [2, 5]);
+  assert.equal(generated.characters, undefined); assert.equal(generated.backgrounds, undefined); assert.equal(generated.configSnapshot, undefined);
+  assert.deepEqual(generated.librarySelection, selection);
+  const resolved = await api('/api/novel-library/resolve', selection);
+  assert.deepEqual(serializePlayableNovel(hydratePlayableNovel(generated, resolved)), generated);
+  const savedA = (await api('/api/projects/guide-a')).project;
+  savedA.science = { novelConfig: { librarySelection: selection, interactionDensity: 'sparse', instruction: '' }, novel: generated };
+  await api('/api/projects/guide-a', savedA, { method: 'PUT' });
+  const generatedB = (await api('/api/ai', ask('guide-b', docB, 'balanced'))).data;
+  const savedB = (await api('/api/projects/guide-b')).project;
+  savedB.science = { novelConfig: { librarySelection: selection, interactionDensity: 'balanced', instruction: '' }, novel: generatedB };
+  await api('/api/projects/guide-b', savedB, { method: 'PUT' });
+  const aFile = path.join(directory, 'data/projects/guide-a.json'), bFile = path.join(directory, 'data/projects/guide-b.json');
+  const beforeA = await readFile(aFile), beforeB = await readFile(bFile);
+  for (const marker of ['ROLE_MARKER', 'TONE_MARKER', 'PERSONALITY_MARKER', '"configSnapshot"', '"characters"', '"backgrounds"']) assert.ok(!beforeA.toString('utf8').includes(marker));
+  assert.deepEqual(await readdir(path.join(directory, 'data/novel-assets')), []);
+  const replacement = (await upload('portrait', '0x557799')).asset;
+  const edited = structuredClone(character); edited.tone = 'TONE_MARKER_UPDATED幽默但准确'; edited.portraits[1].assetId = replacement.id;
+  await api('/api/novel-library/characters', edited);
+  const current = await api('/api/novel-library/resolve', selection);
+  assert.equal(hydratePlayableNovel(generated, current).characters[0].portraits[1].assetId, replacement.id);
+  assert.equal(hydratePlayableNovel(generatedB, current).characters[0].tone, edited.tone);
+  assert.deepEqual(await readFile(aFile), beforeA); assert.deepEqual(await readFile(bFile), beforeB);
+  await api('/api/novel-library/assets/' + think.id, undefined, { method: 'DELETE' });
+  await api('/api/novel-library/characters/' + character.id, undefined, { method: 'DELETE', status: 409 });
+  await api('/api/novel-library/backgrounds/' + background.id, undefined, { method: 'DELETE', status: 409 });
+  const removedPose = structuredClone(edited); removedPose.portraits.pop();
+  await api('/api/novel-library/characters', removedPose, { status: 409 });
+  await api('/api/ai', ask('guide-a', docA, 'dense'));
+  assert.equal(JSON.parse(received.messages[1].content)['创作设置'].interactionDensity, 'dense');
+  assert.ok(received.messages[1].content.includes('TONE_MARKER_UPDATED'));
+  const beforeInvalid = calls, invalid = ask('guide-a', docA, 'balanced');
+  invalid.payload.librarySelection.characterId = 'not-a-library-character';
+  const missingSelection = await api('/api/ai', invalid, { status: 400 });
+  assert.equal(missingSelection.code, 'NOVEL_LIBRARY_SELECTION'); assert.equal(calls, beforeInvalid);
+  mode = 'bad-citation'; await api('/api/ai', ask('guide-a', docA, 'balanced'), { status: 502 }); mode = 'ok';
+  const tasks = await api('/api/tasks?projectId=guide-a');
+  assert.ok(tasks.items.some(task => task.type === 'ai' && task.status === 'succeeded'));
+  assert.ok(tasks.items.some(task => task.type === 'ai' && task.status === 'failed'));
+  await app.close(); app = null;
+  assert.ok(!(await readFile(path.join(directory, 'data/tasks/index.json'), 'utf8')).includes('fixture-shared-only'));
+  if (process.env.GUANGXUAN_TEST_DIR) await writeFile(path.join(parent, 'shared-guide-http-report.json'), JSON.stringify({ status: 'passed', localProviderCalls: calls, externalProviderCalls: 0, selectedGlobalProfilesAuthoritative: true, oneChapterOneSceneOneCharacter: true, inlineQuestionsWithVariableOptions: true, allDensityValuesReachProvider: true, personaTonePersonalityReachProvider: true, noAudienceOrQuestionCount: true, noProjectResourceSnapshots: true, globalUpdatesAcrossProjectsWithoutProjectWrites: true, inUseDeletionProtected: true, badCitationRejected: true }, null, 2));
+});

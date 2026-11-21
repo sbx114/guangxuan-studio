@@ -15,8 +15,6 @@ export class BootSequence {
   private nodes: Map<string, HTMLElement> = new Map();
   private contour: SVGPathElement;
   private letters: SVGTextElement;
-  private plus: SVGPathElement;
-  private minus: SVGPathElement;
   private brandLines: HTMLElement[];
   private scanPaths: SVGPathElement[];
   private orbitDots: SVGCircleElement[];
@@ -54,19 +52,17 @@ export class BootSequence {
     this.contour.setAttribute("d", bootMarkContour);
     this.contour.setAttribute("pathLength", "1");
     const symbols = mark.querySelector("path:not([pathLength])")!;
-    this.plus = document.createElementNS(ns, "path");
-    this.plus.setAttribute("d", "M44 70h50M69 45v50");
-    this.minus = document.createElementNS(ns, "path");
-    this.minus.setAttribute("d", "M219 70h44");
-    [this.plus, this.minus].forEach((p) => {
-      p.setAttribute("stroke", "currentColor");
-      p.setAttribute("stroke-width", "15");
-      mark.insertBefore(p, symbols);
-    });
     symbols.remove();
     this.letters = mark.querySelector("text")!;
-    this.letters.setAttribute("text-anchor", "start");
-    this.letters.setAttribute("x", "20");
+    this.contour.setAttribute("fill", "none");
+    this.contour.setAttribute("stroke", "currentColor");
+    this.letters.setAttribute("text-anchor", "middle");
+    this.letters.setAttribute("x", "155");
+    this.letters.setAttribute("y", "108");
+    this.letters.setAttribute("font-size", "52");
+    this.letters.setAttribute("font-weight", "600");
+    this.letters.setAttribute("letter-spacing", "0");
+    this.letters.setAttribute("fill", "currentColor");
     this.brandLines = Array.from(
       stage.querySelector(".brand")!.children,
     ) as HTMLElement[];
@@ -104,7 +100,8 @@ export class BootSequence {
       el.replaceChildren(ink);
     });
     this.poweredHTML = this.el(".powered").innerHTML;
-    new BootLettering(this.brandLines[0], ["brand"]).setText("GUANGXUAN");
+    if (!this.brandLines[0].hasAttribute("data-brand-mark"))
+      new BootLettering(this.brandLines[0], ["brand"]).setText("Gx");
     // Bind after collecting the original ring paths. Phrase artwork also has
     // SVG paths, and must never be included in the scan's animated geometry.
     this.accessLettering = new BootLettering(this.el(".access-text"), ["access"]);
@@ -117,7 +114,7 @@ export class BootSequence {
       [".welcome-database", "database", "CREATIVE WORKSPACE"],
     ] as const) new BootLettering(this.el(selector), [key]).setText(text);
     this.companyInk.forEach((el) =>
-      new BootLettering(el.querySelector("span")!, ["company"]).setText("GUANGXUAN"),
+      new BootLettering(el.querySelector("span")!, ["company"]).setText("Gx"),
     );
   }
   private el(selector: string) {
@@ -142,20 +139,6 @@ export class BootSequence {
     // it every frame invalidates glyph rasterization under the moving HUD.
     if (this.letters.textContent !== s.logoLetters)
       this.letters.textContent = s.logoLetters;
-    this.plus.style.opacity = this.minus.style.opacity =
-      s.logo.symbolScale > 0 ? "1" : "0";
-    this.plus.setAttribute(
-      "transform",
-      `translate(${s.logo.plusX} 70) rotate(${s.logo.plusAngle}) scale(${s.logo.symbolScale}) translate(-69 -70)`,
-    );
-    this.minus.setAttribute(
-      "d",
-      `M${-s.logo.minusWidth / 2} 0h${s.logo.minusWidth}`,
-    );
-    this.minus.setAttribute(
-      "transform",
-      `translate(${s.logo.minusX} 70) scale(${s.logo.symbolScale})`,
-    );
     this.opacity(".auth-status", s.authOpacity);
     this.authLettering.setText(s.auth);
     this.opacity(".brand", 1);

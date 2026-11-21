@@ -8,16 +8,16 @@
 <script>
   window.openfilmHost={version:1,name:"光宣工作台"};
   try{if(!localStorage.getItem("openfilm.language"))localStorage.setItem("openfilm.language","zh-CN");}catch(e){}
-  /* the theme before the first paint, so the wrong one never flashes: dark unless the person chose another */
+  /* Match the archive before the first paint; retain an explicit dark/system choice. */
   (function () {
-    var t = 'dark';
-    try { t = localStorage.getItem('openfilm.theme') || 'dark'; } catch (e) {}
+    var t = 'light';
+    try { t = localStorage.getItem('openfilm.theme') || 'light'; } catch (e) {}
     if (t === 'system') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';
   })();
 </script>
-  <script type="module" crossorigin src="/assets/index-D8o06kU5.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-DiM3nuLQ.css">
+  <script type="module" crossorigin src="/assets/index-DrKCGDIh.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DEggkQ11.css">
 </head>
 <body>
 <div id="root"></div>

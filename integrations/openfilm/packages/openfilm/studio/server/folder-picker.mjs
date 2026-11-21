@@ -49,6 +49,46 @@ function finderDialog(lines) {
 }
 
 /**
+ * Give Windows' common dialog a real, visible owner while keeping that owner
+ * transparent and out of the taskbar. An unshown TopMost Form has no active
+ * window to own the dialog, so a browser can cover it as the helper starts.
+ * Both the owner and the common dialog are disposed on cancel and on failure.
+ * @param {string[]} lines
+ */
+function windowsDialog(lines) {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding',
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '[System.Windows.Forms.Application]::EnableVisualStyles()',
+    '$d = $null',
+    '$w = $null',
+    'try {',
+    ...lines.slice(0, -1),
+    '$w = New-Object System.Windows.Forms.Form',
+    '$w.ShowInTaskbar = $false',
+    '$w.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None',
+    '$w.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen',
+    '$w.ClientSize = [System.Drawing.Size]::new(1, 1)',
+    '$w.Opacity = 0',
+    '$w.TopMost = $true',
+    '$w.Show()',
+    '$w.Activate()',
+    '$w.BringToFront()',
+    lines.at(-1),
+    '} finally {',
+    'if ($null -ne $d) { $d.Dispose() }',
+    'if ($null -ne $w) { $w.Dispose() }',
+    '}',
+  ].join('\n');
+}
+
+/** @param {string} script @param {Record<string, string>} env */
+function windowsCommand(script, env) {
+  return { cmd: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-STA', '-WindowStyle', 'Hidden', '-Command', script], env };
+}
+
+/**
  * How to open the dialog here: the program, its arguments and the environment it adds; null when this system has none.
  * @param {NodeJS.Platform} platform @param {{ title: string, at?: string | null }} ask @param {(name: string) => boolean} [has]
  * @returns {{ cmd: string, args: string[], env?: Record<string, string> } | null}
@@ -68,18 +108,14 @@ export function folderPickerCommand(platform, { title, at }, has = () => true) {
     };
   }
   if (platform === 'win32') {
-    const script = [
-      // Match execFile's UTF-8 decoding, including paths outside the Windows console code page.
-      '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding',
-      'Add-Type -AssemblyName System.Windows.Forms',
+    const script = windowsDialog([
       '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
       '$d.Description = $env:OPENFILM_PICK_TITLE',
-      '$d.UseDescriptionForTitle = $true',
+      "if ($d.PSObject.Properties['UseDescriptionForTitle']) { $d.UseDescriptionForTitle = $true }",
       'if ($env:OPENFILM_PICK_AT) { $d.SelectedPath = $env:OPENFILM_PICK_AT }',
-      '$w = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }',
       'if ($d.ShowDialog($w) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }',
-    ].join('; ');
-    return { cmd: 'powershell.exe', args: ['-NoProfile', '-STA', '-Command', script], env: { OPENFILM_PICK_TITLE: title, OPENFILM_PICK_AT: start } };
+    ]);
+    return windowsCommand(script, { OPENFILM_PICK_TITLE: title, OPENFILM_PICK_AT: start });
   }
   if (has('zenity')) {
     return { cmd: 'zenity', args: ['--file-selection', '--directory', `--title=${title}`, ...(start ? [`--filename=${start}/`] : [])] };
@@ -113,18 +149,14 @@ export function filePickerCommand(platform, { title, at }, has = () => true) {
     };
   }
   if (platform === 'win32') {
-    const script = [
-      // Match execFile's UTF-8 decoding, including paths outside the Windows console code page.
-      '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding',
-      'Add-Type -AssemblyName System.Windows.Forms',
+    const script = windowsDialog([
       '$d = New-Object System.Windows.Forms.OpenFileDialog',
       '$d.Title = $env:OPENFILM_PICK_TITLE',
       '$d.Multiselect = $true',
       'if ($env:OPENFILM_PICK_AT) { $d.InitialDirectory = $env:OPENFILM_PICK_AT }',
-      '$w = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }',
       'if ($d.ShowDialog($w) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write(($d.FileNames -join "`n")) }',
-    ].join('; ');
-    return { cmd: 'powershell.exe', args: ['-NoProfile', '-STA', '-Command', script], env: { OPENFILM_PICK_TITLE: title, OPENFILM_PICK_AT: start } };
+    ]);
+    return windowsCommand(script, { OPENFILM_PICK_TITLE: title, OPENFILM_PICK_AT: start });
   }
   if (has('zenity')) {
     return { cmd: 'zenity', args: ['--file-selection', '--multiple', '--separator=\n', `--title=${title}`, ...(start ? [`--filename=${start}/`] : [])] };
@@ -141,7 +173,7 @@ export function filePickerCommand(platform, { title, at }, has = () => true) {
 export function cancelled(cmd, error) {
   if (!error) return true;
   if (/-128\b|User canceled/i.test(String(error.message))) return true;
-  return cmd !== 'osascript' && error.code === 1;
+  return (cmd === 'zenity' || cmd === 'kdialog') && error.code === 1;
 }
 
 /**
@@ -169,7 +201,7 @@ export function pickFolder(ask) {
   const command = folderPickerCommand(process.platform, { ...ask, at: startFolder(ask.at) }, onPath);
   if (!command) return Promise.reject(new Error('no folder dialog on this system'));
   return new Promise((resolve, reject) => {
-    execFile(command.cmd, command.args, { env: { ...process.env, ...command.env }, encoding: 'utf8', windowsHide: false, timeout: 15 * 60_000 }, (error, stdout) => {
+    execFile(command.cmd, command.args, { env: { ...process.env, ...command.env }, encoding: 'utf8', windowsHide: true, timeout: 15 * 60_000 }, (error, stdout) => {
       const path = String(stdout).trim().replace(/[\\/]+$/, '') || (String(stdout).trim() === '/' ? '/' : '');
       if (path) { resolve(path); return; }
       if (cancelled(command.cmd, error)) { resolve(null); return; }
@@ -188,7 +220,7 @@ export function pickFiles(ask) {
   const command = filePickerCommand(process.platform, { ...ask, at: startFolder(ask.at) }, onPath);
   if (!command) return Promise.reject(new Error('no file dialog on this system'));
   return new Promise((resolve, reject) => {
-    execFile(command.cmd, command.args, { env: { ...process.env, ...command.env }, encoding: 'utf8', windowsHide: false, timeout: 15 * 60_000 }, (error, stdout) => {
+    execFile(command.cmd, command.args, { env: { ...process.env, ...command.env }, encoding: 'utf8', windowsHide: true, timeout: 15 * 60_000 }, (error, stdout) => {
       const paths = String(stdout).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && isAbsolute(line));
       if (paths.length) { resolve(paths); return; }
       if (cancelled(command.cmd, error)) { resolve([]); return; }

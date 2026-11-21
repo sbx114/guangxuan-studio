@@ -78,17 +78,63 @@ export async function checkLocalService() {
  }
  return result;
 }
-export function showModal({title,kicker='GUANGXUAN / STUDIO',body,wide=false,onMount,onClose}) {
- const root=document.querySelector('#modal-root');
- root.innerHTML=`<div class="modal-backdrop"><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}"><div class="modal-top"><span class="eyebrow">${escapeHtml(kicker)}</span><button class="icon-btn" data-close aria-label="关闭">${icon('close')}</button></div><h2>${escapeHtml(title)}</h2><div class="modal-body">${body}</div></section></div>`;
- const previous=document.activeElement;
- const close=()=>{document.removeEventListener('keydown',key);root.innerHTML='';previous?.focus();onClose?.();};
- const key=(e)=>{if(e.key==='Escape')close();if(e.key==='Tab'){const items=[...root.querySelectorAll('button,input,select,textarea,a[href]')].filter(x=>!x.disabled&&x.offsetParent);const first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}};
- root.querySelector('[data-close]').onclick=close;
- root.querySelector('.modal-backdrop').onclick=e=>{if(e.target===e.currentTarget)close();};
- document.addEventListener('keydown',key);
- root.querySelector('input,textarea,button')?.focus();
- onMount?.(root,close);
+let activeModal = null;
+let modalRequest = 0;
+export function showModal({title,kicker='',body,wide=false,onMount,onClose}) {
+ const root = document.querySelector('#modal-root');
+ const request = ++modalRequest;
+ const previous = activeModal?.previous || document.activeElement;
+ activeModal?.finish(false);
+ // A close callback may itself open a newer dialog.
+ if (request !== modalRequest) return () => {};
+ root.innerHTML=`<div class="modal-backdrop"><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}" tabindex="-1"><div class="modal-top"><span class="eyebrow">${escapeHtml(kicker)}</span><button class="icon-btn" data-close aria-label="关闭">${icon('close')}</button></div><h2>${escapeHtml(title)}</h2><div class="modal-body">${body}</div></section></div>`;
+ const panel = root.querySelector('.modal');
+ panel.style.overscrollBehavior = 'contain';
+ const background = [...document.body.children].filter(node => !node.contains(root) && node.id !== 'toast-region').map(node => ({ node, inert: node.inert }));
+ const scroll = [document.documentElement, document.body].map(node => ({ node, values: ['overflow', 'overflow-x', 'overflow-y'].map(name => [name, node.style.getPropertyValue(name), node.style.getPropertyPriority(name)]) }));
+ let closed = false;
+ const items = () => [...root.querySelectorAll('button,input,select,textarea,a[href],summary,audio[controls],video[controls],[tabindex]')].filter(node => node.tabIndex >= 0 && !node.disabled && !node.closest('[hidden],[inert]') && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
+ const focusFirst = () => (items()[0] || panel).focus({ preventScroll: true });
+ const session = { previous, finish };
+ function finish(restoreFocus = true) {
+  if (closed) return;
+  closed = true;
+  document.removeEventListener('keydown', key, true);
+  document.removeEventListener('focusin', containFocus, true);
+  if (activeModal === session) {
+   activeModal = null;
+   root.replaceChildren();
+   for (const { node, inert } of background) node.inert = inert;
+   for (const { node, values } of scroll) {
+    node.style.removeProperty('overflow');
+    for (const [name, value, priority] of values) if (value) node.style.setProperty(name, value, priority);
+   }
+   if (restoreFocus && previous?.isConnected && !previous.closest('[inert]')) previous.focus({ preventScroll: true });
+  }
+  onClose?.();
+ }
+ const close = () => finish();
+ const key = event => {
+  if (activeModal !== session) return;
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+  if (event.key !== 'Tab') return;
+  const targets = items(), first = targets[0], last = targets.at(-1), focused = document.activeElement;
+  if (!targets.length) { event.preventDefault(); panel.focus({ preventScroll: true }); }
+  else if (!root.contains(focused) || focused === panel || (event.shiftKey ? focused === first : focused === last)) {
+   event.preventDefault(); (event.shiftKey ? last : first).focus({ preventScroll: true });
+  }
+ };
+ const containFocus = event => { if (activeModal === session && !root.contains(event.target)) focusFirst(); };
+ activeModal = session;
+ for (const { node } of background) node.inert = true;
+ for (const { node } of scroll) node.style.setProperty('overflow', 'hidden');
+ root.querySelector('[data-close]').onclick = close;
+ root.querySelector('.modal-backdrop').onclick = event => { if (event.target === event.currentTarget) close(); };
+ document.addEventListener('keydown', key, true);
+ document.addEventListener('focusin', containFocus, true);
+ focusFirst();
+ try { onMount?.(root, close); }
+ catch (error) { close(); throw error; }
  return close;
 }
 export async function saveFile(name,content,mime='text/plain;charset=utf-8') {

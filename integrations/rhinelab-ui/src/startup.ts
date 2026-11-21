@@ -16,8 +16,8 @@ export class StartupGate {
     const { root } = options;
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-modal", "true");
-    root.setAttribute("aria-label", "进入光宣工作台");
-    root.insertAdjacentHTML("beforeend", '<div class="entry-controls"><button class="entry-start" disabled>正在准备终端…</button><button class="entry-silent" hidden>关闭声音并进入</button><p class="entry-status" role="status">资源就绪后即可进入</p></div>');
+    root.setAttribute("aria-label", "进入 Gx");
+    root.insertAdjacentHTML("beforeend", '<div class="entry-controls"><button class="entry-start" disabled>正在准备…</button><button class="entry-silent" hidden>无声进入</button><p class="entry-status" role="status">正在准备</p></div>');
     this.button = root.querySelector<HTMLButtonElement>(".entry-start")!;
     this.silent = root.querySelector<HTMLButtonElement>(".entry-silent")!;
     this.status = root.querySelector<HTMLElement>(".entry-status")!;
@@ -48,7 +48,7 @@ export class StartupGate {
     this.options.root.dataset.entry = "waiting";
     this.button.disabled = false;
     this.button.textContent = "点击进入 →";
-    this.options.root.querySelector(":scope > span")!.textContent = "INTERNAL DATABASE / READY";
+    this.options.root.querySelector(":scope > span")!.textContent = "Gx";
     this.status.textContent = "轻触屏幕或按 Enter 开始";
     this.button.focus({ preventScroll: true });
   }

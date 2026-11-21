@@ -1,0 +1,104 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { PassThrough } from 'node:stream';
+import { createProjectStore } from '../lib/store.mjs';
+import { createVideoService } from '../lib/video.mjs';
+import { createOpenFilmManager } from '../lib/openfilm.mjs';
+import { createAssistantAppTools } from '../lib/assistant-app-tools.mjs';
+import { readFilmFile, clipFade } from '../integrations/openfilm/packages/openfilm/src/film-doc.mjs';
+import { readMotion } from '../integrations/openfilm/packages/openfilm/src/clip-motion.mjs';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), command = promisify(execFile);
+const all = doc => doc.tracks.flatMap(track => track.clips || []);
+test('real native precise edits keep unrelated tracks, split with CAS, validate atomically and undo actual film bytes', { skip: process.env.GUANGXUAN_TEST_OPENFILM !== '1', timeout: 90000 }, async t => {
+  const parent = path.resolve(process.env.GUANGXUAN_TEST_DIR || os.tmpdir()); await mkdir(parent, { recursive: true });
+  const folder = await mkdtemp(path.join(parent, 'gx-native-adjust-')), dataDir = path.join(folder, 'data');
+  let videoService, manager;
+  t.after(async () => { await manager?.close(); await videoService?.close(); assert.equal(path.dirname(path.resolve(folder)), parent); await rm(folder, { recursive: true, force: true }); });
+  const bin = name => process.env['GUANGXUAN_' + name.toUpperCase()] || (process.env.GUANGXUAN_BIN_DIR ? path.join(process.env.GUANGXUAN_BIN_DIR, name + (process.platform === 'win32' ? '.exe' : '')) : name);
+  const source = path.join(folder, 'source.mp4'), sound = path.join(folder, 'music.wav');
+  await Promise.all([
+    command(bin('ffmpeg'), ['-v', 'error', '-nostdin', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=15:d=8', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', source], { windowsHide: true }),
+    command(bin('ffmpeg'), ['-v', 'error', '-nostdin', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=8', sound], { windowsHide: true }),
+  ]);
+  const store = await createProjectStore(dataDir);
+  videoService = await createVideoService({ dataDir, root, ffmpegPath: bin('ffmpeg'), ffprobePath: bin('ffprobe') });
+  const a = await videoService.importLocalFile(source, { generated: true, name: 'Remotion-rendered-output.mp4' }), music = await videoService.importLocalFile(sound);
+  const id = 'native-adjust-fixture', origin = 'http://127.0.0.1:49101';
+  await store.save(id, { kind: 'video', title: 'precise fixture', video: { timeline: [{ assetId: a.id, start: 0, end: 4 }, { assetId: a.id, start: 4, end: 6 }], captions: [{ start: 0, end: 6, text: 'Original caption' }], music: { assetId: music.id, volume: .2 }, aspect: '16:9', resolution: '720' } });
+  manager = await createOpenFilmManager({ dataDir, root, store, resolveAsset: id => videoService.resolveAsset(id), registerOwnedAsset: (...args) => videoService.registerOwnedAsset(...args) });
+  const filmFile = path.join(dataDir, 'openfilm/projects', id, 'film.html');
+  const read = async () => { const parsed = readFilmFile(await readFile(filmFile, 'utf8')); assert.deepEqual(parsed.problems, []); return parsed.doc; };
+  let current = await manager.context(id, origin); const first = current.timeline[0].id, later = current.timeline[1].id, before = await read();
+  const scope = { assetIds: [current.timeline[0].assetId], placement: { mode: 'range', start: 0, end: 4, clipIds: [first] } };
+  const inspected = await manager.context(id, origin, { editScope: scope }); assert.equal(inspected.editorTimeline.clips.find(clip => clip.id === first).editable, true); assert.equal(inspected.editorTimeline.clips.find(clip => clip.id === later).editable, false);
+  const applied = await manager.adjustClips(id, [{ action: 'volume', clipId: first, value: 0 }, { action: 'fade', clipId: first, in: .2, out: .3 }, { action: 'transform', clipId: first, scale: .8, rotation: 12, opacity: .7 }, { action: 'look', clipId: first, preset: 'cinematic', strength: .4 }, { action: 'motion', clipId: first, property: 'scale', keys: [{ time: 0, value: 1 }, { time: 4, value: 1.15, easing: 'ease-out' }] }], origin, current.revision, { keepUndo: true, editScope: scope });
+  const changed = await read(), target = all(changed).find(clip => clip.id === first);
+  assert.equal(target.volume, 0); assert.deepEqual(clipFade(target), [.2, .3]); assert.equal(target.box.r, 12); assert.match(target.style, /opacity: 0.7/); assert.match(target.style, /filter:/);
+  assert.equal(readMotion(target, changed.keyframes).scale[1].v, 1.15);
+  for (const clip of all(before).filter(clip => clip.id !== first)) assert.deepEqual(all(changed).find(item => item.id === clip.id), clip, 'Unrelated clips remain byte-equivalent in the native value');
+  await assert.rejects(() => manager.adjustClips(id, [{ action: 'remove', clipId: first }], origin, current.revision, { editScope: scope }), { code: 'OPENFILM_REVISION_CONFLICT' });
+  const stable = await readFile(filmFile, 'utf8');
+  await assert.rejects(() => manager.adjustClips(id, [{ action: 'volume', clipId: first, value: .4 }, { action: 'remove', clipId: later }], origin, applied.revision, { editScope: scope }), { code: 'NATIVE_ADJUST_SCOPE' });
+  assert.equal(await readFile(filmFile, 'utf8'), stable, 'A bad later operation prevents the entire batch from writing');
+  await manager.undoAssistant(id, applied.undo.id, origin); assert.deepEqual(await read(), before);
+  current = await manager.context(id, origin);
+  const split = await manager.adjustClips(id, [{ action: 'split', clipId: first, at: 2 }], origin, current.revision, { editScope: scope });
+  const splitDoc = await read(), right = all(splitDoc).find(clip => clip.id === split.results[0].createdClipId);
+  assert.deepEqual(all(splitDoc).find(clip => clip.id === first).time, [0, 2]); assert.deepEqual(right.time, [2, 4]); assert.equal(right.at, 2);
+  const cancel = new AbortController(); cancel.abort();
+  await assert.rejects(() => manager.adjustClips(id, [{ action: 'remove', clipId: first }], origin, split.revision, { editScope: scope, signal: cancel.signal }), { code: 'REQUEST_CANCELLED' });
+  assert.deepEqual(await read(), splitDoc);
+  await manager.undoAssistant(id, split.undo.id, origin); assert.deepEqual(await read(), before);
+  current = await manager.context(id, origin);
+  const expanded = await manager.operateClips(id, [{ action: 'fit', clipId: first, mode: 'cover', x: 30, y: 50 }, { action: 'crop', clipId: first, left: 5, right: 5 }, { action: 'detach_audio', clipId: first }, { action: 'caption_add', text: '真实 <b>纯文本</b> 字幕', at: 0, duration: .5 }, { action: 'subtitles_write', cues: [{ start: 0, end: .5, text: '实际WebVTT <b>原文</b>' }] }], origin, current.revision);
+  const expandedDoc = await read(), newCaption = all(expandedDoc).find(clip => clip.id === expanded.results.find(item => item.action === 'caption_add').createdClipId);
+  assert.match(await readFile(path.join(path.dirname(filmFile), newCaption.src), 'utf8'), /&lt;b&gt;纯文本&lt;\/b&gt;/);
+  const subtitleTrack = expandedDoc.tracks.find(track => track.captions);
+  assert.match(await readFile(path.join(path.dirname(filmFile), subtitleTrack.captions.src), 'utf8'), /WEBVTT/);
+  const subtitleIndex = expandedDoc.tracks.indexOf(subtitleTrack), actualSubtitles = await manager.readSubtitles(id, subtitleIndex, origin);
+  assert.equal(actualSubtitles.cues[0].index, 0); assert.match(actualSubtitles.cues[0].text, /实际WebVTT/); assert.equal(JSON.stringify(actualSubtitles).includes(path.dirname(filmFile)), false);
+  const subtitleEdited = await manager.operateClips(id, [{ action: 'subtitles_edit', track: subtitleIndex, edits: [{ action: 'update', index: 0, text: '真实字幕修改 <b>纯文本</b>' }] }], origin, expanded.revision, { editScope: { placement: { mode: 'range', start: 0, end: .5 } } });
+  assert.match((await manager.readSubtitles(id, subtitleIndex, origin)).cues[0].text, /真实字幕修改 &lt;b&gt;纯文本&lt;\/b&gt;/);
+  assert.match(await readFile(path.join(path.dirname(filmFile), subtitleTrack.captions.src), 'utf8'), /实际WebVTT/, 'Editing publishes a new VTT and leaves the original source intact');
+  await manager.undoAssistant(id, subtitleEdited.undo.id, origin); assert.deepEqual(await read(), expandedDoc);
+  assert.equal(all(expandedDoc).find(clip => clip.id === expanded.results.find(item => item.action === 'detach_audio').createdClipId).sound, true);
+  await assert.rejects(() => manager.operateClips(id, [{ action: 'stage', width: 720, height: 1280 }], origin, expanded.revision, { editScope: scope }), { code: 'NATIVE_OPERATION_WHOLE_PROJECT_REQUIRED' });
+  await manager.undoAssistant(id, expanded.undo.id, origin); assert.deepEqual(await read(), before, 'Expanded operations restore complete native film and subtitle track topology');
+  current = await manager.context(id, origin);
+  const caption = current.editorTimeline.clips.find(clip => clip.caption), captionSource = all(before).find(clip => clip.id === caption.id).src;
+  const oldHtml = await readFile(path.join(path.dirname(filmFile), captionSource), 'utf8');
+  const captionEdit = await manager.adjustClips(id, [{ action: 'caption', clipId: caption.id, text: '真实字幕修改 <b>保留纯文本</b>', fontSize: 44, color: '#FFD700', fontWeight: 700, placement: 'center' }], origin, current.revision);
+  const captionDoc = await read(), editedCaption = all(captionDoc).find(clip => clip.id === caption.id);
+  assert.equal(editedCaption.overrides.find(override => override.at === '#caption').text, '真实字幕修改 <b>保留纯文本</b>'); assert.equal(editedCaption.overrides.find(override => override.at === '#caption').style.fontSize, '44px');
+  assert.equal(await readFile(path.join(path.dirname(filmFile), captionSource), 'utf8'), oldHtml, 'Shared HTML source is not rewritten by a caption edit');
+  await assert.rejects(() => manager.exportVideo(id, { range: [0, .5] }, origin, { expectedRevision: current.revision }), { code: 'OPENFILM_REVISION_CONFLICT' });
+  await assert.rejects(() => manager.exportVideo(id, { range: [0, .5] }, origin, { expectedRevision: 'invalid' }), { code: 'OPENFILM_REVISION_REQUIRED' });
+  const exported = await manager.exportVideo(id, { fps: 15, range: [0, .5], name: 'Precise editing verification' }, origin, { expectedRevision: captionEdit.revision });
+  let exportJob;
+  for (let count = 0; count < 120; count++) { exportJob = (await manager.nativeExports(id)).exports.find(job => job.id === exported.export.id); if (['done', 'error', 'cancelled'].includes(exportJob?.status)) break; await new Promise(resolve => setTimeout(resolve, 300)); }
+  assert.equal(exportJob?.status, 'done', JSON.stringify(exportJob));
+  const sink = new PassThrough(), chunks = []; sink.writeHead = () => {}; sink.on('data', chunk => chunks.push(chunk));
+  await manager.download({ method: 'GET' }, sink, id, exported.export.id);
+  const output = Buffer.concat(chunks), outputFile = path.join(folder, 'precise-edit.mp4'); await writeFile(outputFile, output);
+  const probe = JSON.parse((await command(bin('ffprobe'), ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', outputFile], { windowsHide: true })).stdout);
+  assert.ok(output.length > 1000); assert.ok(probe.streams.some(stream => stream.codec_type === 'video')); assert.ok(Number(probe.format.duration) >= .45);
+  if (process.env.GUANGXUAN_PRECISE_EDIT_EVIDENCE) { const evidence = path.resolve(process.env.GUANGXUAN_PRECISE_EDIT_EVIDENCE); await mkdir(evidence, { recursive: true }); await writeFile(path.join(evidence, 'precise-edit.mp4'), output); await writeFile(path.join(evidence, 'native-adjust-verification.json'), JSON.stringify({ status: 'passed', actualNativeEditor: true, actualMp4Export: true, duration: Number(probe.format.duration), bytes: output.length, testedActions: ['volume', 'fade', 'transform', 'look', 'motion', 'split', 'caption'], preservedUnrelatedClips: true, atomicBadBatchRejected: true, staleRevisionRejected: true, actualNativeUndo: true }, null, 2)); }
+  await manager.undoAssistant(id, captionEdit.undo.id, origin); assert.deepEqual(await read(), before);
+  const adapter = createAssistantAppTools({ store, openFilm: manager }), ctx = { projectId: id, runId: 'native-real-sequence', callId: 'first', instruction: '把选中片段分割，并把右半段静音', editScope: scope, origin, mode: 'auto', signal: new AbortController().signal, update() {} };
+  try {
+    const call = (name, args) => adapter.tools.find(tool => tool.name === name).execute(args || {}, ctx);
+    await call('native_inspect');
+    const firstEdit = await call('native_adjust', { edits: [{ action: 'split', clipId: first, at: 2 }] }), halfId = firstEdit.data.results[0].createdClipId;
+    const afterSplit = await call('native_inspect'); assert.ok(afterSplit.data.clips.some(clip => clip.id === halfId && clip.editable));
+    const secondEdit = await call('native_adjust', { edits: [{ action: 'volume', clipId: halfId, value: 0 }] }); assert.equal(all(await read()).find(clip => clip.id === halfId).volume, 0);
+    await adapter.undo({ projectId: id, undoId: secondEdit.effects[0].undo.id }, { origin });
+    await adapter.undo({ projectId: id, undoId: firstEdit.effects[0].undo.id }, { origin }); assert.deepEqual(await read(), before);
+  } finally { await adapter.close(); }
+});

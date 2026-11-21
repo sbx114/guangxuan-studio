@@ -55,6 +55,7 @@ test('only a real cancel is a cancel: osascript failing (Finder not allowed) is 
   assert.equal(cancelled('osascript', fail(1, 'execution error: Not authorized to send Apple events to Finder. (-1743)')), false);
   assert.equal(cancelled('zenity', fail(1, '')), true);
   assert.equal(cancelled('kdialog', fail(2, 'crashed')), false);
+  assert.equal(cancelled('powershell.exe', fail(1, 'dialog failed')), false, 'a Windows helper failure is not a cancel');
 });
 
 test('a dialog starts in the folder asked, or the nearest one above it that is there', () => {
@@ -85,4 +86,30 @@ for (const [kind, picker] of [['folder', folderPickerCommand], ['files', filePic
     });
     assert.equal(stdout, expected);
   });
+
+  test(`Windows: ${kind} dialog has a shown topmost owner and releases it afterwards`, { skip: process.platform !== 'win32', timeout: 15_000 }, () => {
+    const command = picker('win32', { title: 'Choose' });
+    const script = command.args.at(-1);
+    const invoke = script.split('\n').find((line) => line.startsWith('if ($d.ShowDialog($w)'));
+    assert.ok(invoke);
+    // Exercise the real WinForms owner without leaving an interactive chooser open.
+    const probe = script.replace(invoke, '$state = @{ visible = $w.Visible; topmost = $w.TopMost; handleCreated = $w.IsHandleCreated; taskbar = $w.ShowInTaskbar; opacity = $w.Opacity }') +
+      '\n$state.disposed = $w.IsDisposed; [Console]::Out.Write(($state | ConvertTo-Json -Compress))';
+    const stdout = execFileSync(command.cmd, [...command.args.slice(0, -1), probe], {
+      env: { ...process.env, ...command.env }, encoding: 'utf8', windowsHide: true, timeout: 10_000,
+    });
+    assert.deepEqual(JSON.parse(stdout), { visible: true, topmost: true, handleCreated: true, taskbar: false, opacity: 0, disposed: true });
+  });
 }
+
+test('Windows: a failed common dialog still disposes its shown owner', { skip: process.platform !== 'win32', timeout: 15_000 }, () => {
+  const command = filePickerCommand('win32', { title: 'Choose' });
+  const script = command.args.at(-1);
+  const invoke = script.split('\n').find((line) => line.startsWith('if ($d.ShowDialog($w)'));
+  assert.ok(invoke);
+  const probe = `try {\n${script.replace(invoke, "throw 'chooser failure'")}\n} catch { $failed = $true }\n[Console]::Out.Write((@{ failed = $failed; disposed = $w.IsDisposed } | ConvertTo-Json -Compress))`;
+  const stdout = execFileSync(command.cmd, [...command.args.slice(0, -1), probe], {
+    env: { ...process.env, ...command.env }, encoding: 'utf8', windowsHide: true, timeout: 10_000,
+  });
+  assert.deepEqual(JSON.parse(stdout), { failed: true, disposed: true });
+});

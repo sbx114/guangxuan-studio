@@ -83,4 +83,46 @@ SOFTWARE.
 
 ## 其他组件
 
+### 网址参考工具 yt-dlp
+
+Windows发行包随附官方 yt-dlp **2026.10.26**，用于公开单视频网页的信息解析。主程序的许可证不改变该独立组件及其依赖的许可证。
+
+- 固定版本与校验信息：`scripts/reference-downloader-manifest.json`
+- 官方发行页：https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26
+- 对应源码：https://github.com/yt-dlp/yt-dlp/tree/2026.10.26
+- 源码归档：https://github.com/yt-dlp/yt-dlp/archive/refs/tags/2026.10.26.tar.gz
+- yt-dlp源代码本体采用Unlicense；官方Windows合并可执行文件及其所含依赖整体采用GPL-3.0-or-later，详见官方README的Licensing章节。
+- 发行包保留完整GPLv3、源码许可、官方README与校验清单，位于 `resources/third-party/reference-video/`；可执行文件位于 `resources/bin/yt-dlp.exe`。
+
+打包器依据固定版本的官方SHA256校验工具，不携带用户浏览器资料、cookie或登录状态。获取脚本 `scripts/reference-downloader-setup.mjs` 可重现同版本下载和校验。
+
 Electron、Chromium、React、Remotion、FFmpeg 及其他依赖保留各自许可证。具体分发来源及位置另见 `desktop/THIRD_PARTY.md`。
+
+## PDF 导入运行时与本地字库
+
+论文与教材PDF解析使用精确版本 unpdf 2.2.1（https://github.com/unjs/unpdf ，unpdf自身代码为MIT）。发行程序包含其完整普通包文件及LICENSE；内嵌PDF.js、JBIG2/OpenJPEG相关代码的各自许可一并保留在 `node_modules/unpdf/dist/licenses/`，不可将本应用或unpdf自身的MIT许可证视为对这些组件重新授权。
+
+为在不联网的情况下提取常见中文CID PDF文字，程序从官方 pdfjs-dist 6.5.438 包中随附CMaps与standard_fonts纯数据。相关许可证与来源记录位于：
+
+- `lib/science-pdf-assets/LICENSE_PDFJS`
+- `lib/science-pdf-assets/cmaps/LICENSE`
+- `lib/science-pdf-assets/standard_fonts/LICENSE_FOXIT`
+- `lib/science-pdf-assets/standard_fonts/LICENSE_LIBERATION`
+- `lib/science-pdf-assets/NOTICE.md`
+
+Galgame人物立绘、表情及场景图片使用用户导入的素材，当前版本不再随附默认人物或场景绘图。Paper2Gal相关公开介绍只用于了解功能流程，未复制其人物、背景、音乐、品牌或业务代码。
+## Video Shotcraft 源码参考库
+
+本应用随附 Vincentwei1021/video-shotcraft 的一组原始源码文本，供AI查阅并按当前工程独立改写相机、运动、排版、媒体循环及可编辑时间线机制；这些文本不作为可执行内置模板或固定场景类型运行。
+
+- 上游：https://github.com/Vincentwei1021/video-shotcraft
+- 固定提交：075b548c2405a07b77129eb448b0b504fc60dea3
+- 根许可证：Apache License 2.0；完整原文随附于 `lib/remotion-references/shotcraft/LICENSE`。
+- 逐文件上游路径、Git blob SHA、SHA256、依赖与改写说明：`lib/remotion-references/shotcraft/origin-manifest.json`。全部 `.source.txt` 保留上游原始代码、注释和来源信息。
+- 上游此提交没有单独的NOTICE文件；镜头研究来源说明一并保留于 `lib/remotion-references/shotcraft/UPSTREAM_ATTRIBUTION.md`。未随附其视频、音乐、截图、品牌或其它媒体资产；引用来源不代表对来源作品取得授权。
+
+此参考库的加载器和检索接口是Gx新增代码；上游源码文本仍按其Apache-2.0许可及原出处提供。AI生成到用户工程的代码会按实际用途适配，不能据此把整个Gx、Remotion或第三方媒体重新授权。
+
+## 本次公开 Windows 发行
+
+公开安装器和便携包使用 `-PublicDistribution` 构建，不随包附带 FFmpeg、FFprobe、yt-dlp 或 Remotion 原生 compositor。首次启动从固定官方来源取得完整组件、校验并写入用户数据目录的工具缓存。此前描述随包媒体工具的段落适用于常规开发构建；本次公开发行以 `COPYRIGHT.md`、`THIRD_PARTY_SOURCES.md` 和 `scripts/distribution-runtime-manifest.json` 为准。各原始许可与源码入口保持提供。

@@ -7,7 +7,7 @@
  * are written one at a time (see editor/use-film.ts); the agent's writes come in through the folder's events.
  */
 import * as React from 'react';
-import { registerStudioFlush, showManagedArchive, showManagedProjectInfo } from '../guangxuan-host';
+import { registerStudioFlush, registerStudioTimeline, requestManagedRangeEdit, showManagedArchive, showManagedProjectInfo } from '../guangxuan-host';
 import { afterPaintIdle } from '@/lib/after-paint-idle';
 import { loadCanvas } from './canvas/load';
 import { CanvasLoading } from './canvas/CanvasLoading';
@@ -193,7 +193,7 @@ const CANVAS_KEY = 'openfilm.canvas.open';
 const canvasShown = (projectId: string) => { try { return localStorage.getItem(`${CANVAS_KEY}:${projectId}`) === '1'; } catch { return false; } };
 
 const TOP_BTN =
-  'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)]';
+  'flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40';
 
 /**
  * Which edit-history label a batch of clip edits gets: by its most telling property; a track's switch by its badge; a
@@ -523,7 +523,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
       const el = event.target as HTMLElement | null;
       if (event.defaultPrevented || event.repeat || keyAction(event) !== 'work-mode' || isTypingTarget(el) || el?.closest?.('[role="dialog"]')) return;
       /* a dialog of the canvas's open (a redraw, a library): it has the keys until it closes */
-      if (document.querySelector('[data-studio-canvas] [role="dialog"]')) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], [data-studio-canvas] [role="dialog"]')) return;
       event.preventDefault();
       workModeRef.current();
     };
@@ -617,6 +617,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const t = Math.max(0, Math.min(ms / 1000, player.current.duration || ms / 1000));
     /* playing, it plays on from there (the preview is told the player's new line); still, the picture shows t */
     player.current.seek(t);
+    timeRef.current = t * 1000;
     setTimeMs(t * 1000);
     if (!player.current.playing) preview.current?.seek(pictureAt(t));
     for (const fn of listeners.current) fn();
@@ -1004,6 +1005,21 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   const stageControl = React.useRef<FilmStageControl | null>(null);
   const bridgeFilm = React.useRef({ settled: film.settled, error: film.error });
   bridgeFilm.current = { settled: film.settled, error: film.error };
+  const bridgeSelection = React.useRef(selectedBlocks);
+  bridgeSelection.current = selectedBlocks;
+  React.useEffect(() => registerStudioTimeline(projectId, {
+    selection: () => {
+      const marked = rangeNowRef.current, picked = bridgeSelection.current;
+      const start = marked?.startMs ?? (picked.length ? Math.min(...picked.map(block => block.startMs)) : null);
+      const end = marked?.endMs ?? (picked.length ? Math.max(...picked.map(block => block.endMs)) : null);
+      return { range: start !== null && end !== null && end > start ? { start: start / 1000, end: end / 1000 } : null, playhead: timeRef.current / 1000, clipIds: picked.filter(block => start !== null && end !== null && block.endMs > start && block.startMs < end).map(block => block.clipId || block.id).slice(0, 200) };
+    },
+    seek: ({ start, clipId }) => {
+      seek(start * 1000);
+      const selected = clipId ? blocksRef.current.find(block => (block.clipId || block.id) === clipId) : null;
+      if (selected) { bridgeSelection.current = [selected]; setSelectedKeys([selected.clipId ?? selected.id]); }
+    },
+  }), [projectId, seek]);
   React.useEffect(() => registerStudioFlush(projectId, async () => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     stageControl.current?.flushPending();
@@ -3798,13 +3814,24 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const answer = await res.json().catch(() => ({})) as Record<string, unknown>;
     return { ok: res.ok, status: res.status, answer };
   }, []);
+  const pickerPending = React.useRef(false);
   const onPick = React.useCallback(async (title: string, folder: boolean): Promise<string[] | 'no-dialog'> => {
-    if (folder && studioHost?.folders?.pick) { const path = await studioHost.folders.pick({ title }); return path ? [path] : []; }
-    const { ok, status, answer } = await postJson(folder ? '/api/pick-folder' : '/api/pick-files', { title });
-    if (status === 501) return 'no-dialog';
-    if (!ok) return [];
-    return folder ? (typeof answer.path === 'string' ? [answer.path] : []) : Array.isArray(answer.paths) ? answer.paths.map(String) : [];
-  }, [postJson]);
+    // Project/Saved and the drawer can mount separate panes; only the request
+    // that opened the system dialog may receive its result and start an import.
+    if (pickerPending.current) return [];
+    pickerPending.current = true;
+    const failed = () => new Error(t('assets.uploadFailed'));
+    try {
+      if (folder && studioHost?.folders?.pick) {
+        const path = await studioHost.folders.pick({ title }).catch(() => { throw failed(); });
+        return path ? [path] : [];
+      }
+      const { ok, status, answer } = await postJson(folder ? '/api/pick-folder' : '/api/pick-files', { title }).catch(() => { throw failed(); });
+      if (status === 501) return 'no-dialog';
+      if (!ok) throw new Error(typeof answer.error === 'string' && answer.error.trim() ? answer.error : t('assets.uploadFailed'));
+      return folder ? (typeof answer.path === 'string' && answer.path ? [answer.path] : []) : Array.isArray(answer.paths) ? answer.paths.map(String) : [];
+    } finally { pickerPending.current = false; }
+  }, [postJson, t]);
   const onBring = React.useCallback(async (paths: string[], into: string, mode: 'copy' | 'link'): Promise<string[]> => {
     const { ok, answer } = await postJson(`${projectApi}/files/bring`, { paths, into, mode });
     if (!ok) throw new Error(String(answer.error ?? t('assets.uploadFailed')));
@@ -4200,6 +4227,9 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   /* the keys, read fresh each time (they act on what is selected and marked now) */
   const keyNowRef = React.useRef<(event: KeyboardEvent) => void>(() => {});
   keyNowRef.current = (event) => {
+    // Menus may be portalled outside their modal. The modal still owns the
+    // keys, including Space/Undo forwarded by an already focused preview.
+    if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
     if (referKeysRef.current(event)) return;
     const el = event.target as HTMLElement | null;
     const cmd = keyAction(event);
@@ -4531,6 +4561,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     return () => { if (later) clearTimeout(later); stop(); };
   }, [projectId]);
   const openHistory = () => {
+    if (layoutEditingRef.current) return;
     pause();
     setHistoryOpen((v) => !v);
   };
@@ -4539,6 +4570,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   /* the picture's menu is built before this: it reaches export through a ref */
   const exportTrayRef = React.useRef<ExportTrayHandle>(null);
   const openClipExport = React.useCallback((clipId: string) => {
+    if (layoutEditingRef.current) return;
     if (!(totalMs > 0)) { toast.show(t('project.filmNotReady')); return; }
     setExportClipId(clipId);
     setExportOpen(true);
@@ -4613,10 +4645,11 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                 value={workspaceLayout} onChange={applyWorkspace} onReset={resetWorkspace}
                 hasChat={Boolean(hostPanel)} viewport={workspaceViewport} timelineFitHeight={fitTimelineHeight.current} inspectorIdle={inspectorIdle} onEdit={beginLayoutEdit} layoutEditing={Boolean(layoutDraft.draft)} storageFailed={workspaceStorageFailed} />
               {canvasOpen ? null : (<>
-              <ProjectHistoryButton open={historyOpen} onClick={openHistory} className={TOP_BTN} />
+              <ProjectHistoryButton open={historyOpen} onClick={openHistory} className={TOP_BTN} disabled={Boolean(layoutDraft.draft)} />
               <Tooltip label={t('projectMenu.export')} side="bottom">
-                <button type="button" aria-label={t('projectMenu.export')} aria-haspopup="dialog" aria-expanded={exportOpen} className={TOP_BTN}
+                <button type="button" aria-label={t('projectMenu.export')} aria-haspopup="dialog" aria-expanded={exportOpen} className={TOP_BTN} disabled={Boolean(layoutDraft.draft)}
                   onClick={() => {
+                    if (layoutEditingRef.current) return;
                     if (previewError) toast.showError(`${t('project.filmCannotExport')} ${previewError}`);
                     else if (totalMs > 0) setExportOpen(true);
                     else toast.show(t('project.filmNotReady'));
@@ -4970,6 +5003,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                     range={markedRange}
                     flashRange={flashRange}
                     onRangeChange={setMarkedRange}
+                    {...(window.parent !== window ? { onAiRange: () => { void requestManagedRangeEdit(projectId).then(handled => { if (!handled) toast.show('请在Gx视频主时间线中使用此功能。'); }).catch(toast.showError); }, aiRangeReady: Boolean(markedRange || selectedBlocks.length) } : {})}
                     trackMenuExtra={trackMenuExtra}
                     onOrganizeTracks={organizeTimelineTracks}
                     transcribed={transcribedSrcs}

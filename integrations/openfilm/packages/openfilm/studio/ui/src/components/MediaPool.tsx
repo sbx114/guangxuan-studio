@@ -37,6 +37,7 @@ import {
   LayoutGrid,
   List,
   ListFilter,
+  LoaderCircle,
   Pencil,
   Plus,
   Search,
@@ -49,6 +50,7 @@ import {
 import { useT } from '@/i18n';
 import { clearResourceDrag, dragPicture, setResourceDragData } from '@/lib/resource-drag';
 import { STUDIO_REF_TYPE, type StudioRef } from '@/lib/host';
+import { notifyManagedImport } from '../guangxuan-host';
 import {
   formatClipDuration,
   formatFileSize,
@@ -247,6 +249,8 @@ export function MediaPool({
   const [confirm, setConfirm] = React.useState<{ targets: { path: string; folder: boolean }[]; name: string } | null>(null);
   const [uploads, setUploads] = React.useState<Upload[]>([]);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [pickerPending, setPickerPending] = React.useState<string | null>(null);
+  const pickerPendingRef = React.useRef(false);
   const [dropTarget, setDropTarget] = React.useState<string | null>(null);
   const [osDrag, setOsDrag] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -366,13 +370,19 @@ export function MediaPool({
       return { id: `upload-${++uploadSeq}`, name: file.name, into: intoRel, kind, ratio: 0, ...(kind === 'image' ? { preview: URL.createObjectURL(file) } : {}) };
     });
     setUploads((all) => [...all, ...batch]);
+    const taskId = crypto.randomUUID(), name = `导入${list.length}个媒体文件`, ratios = list.map(() => 0);
+    const report = (status: 'queued' | 'running' | 'succeeded' | 'failed') => notifyManagedImport(projectId, { id: taskId, name, status, progress: status === 'succeeded' ? 1 : ratios.reduce((sum, ratio) => sum + ratio, 0) / list.length });
+    report('queued'); report('running');
     try {
       /* into the open folder (the top of assets/ unless the person went into one), or the folder they were dropped on */
       await onImport(list, folderPath(intoRel), (i, ratio, landed) => {
         const id = batch[i]?.id;
+        if (Number.isInteger(i) && i >= 0 && i < ratios.length && Number.isFinite(ratio)) { ratios[i] = Math.max(0, Math.min(1, ratio)); report('running'); }
         setUploads((all) => all.map((u) => (u.id === id ? { ...u, ratio, ...(landed ? { landed } : {}) } : u)));
       });
+      report('succeeded');
     } catch (e) {
+      report('failed');
       setNotice(e instanceof Error && e.message ? e.message : t('assets.uploadFailed'));
       /* what did not get in goes; what did stays until the listing has it */
       dropUploads((u) => batch.some((b) => b.id === u.id) && !u.landed);
@@ -382,16 +392,46 @@ export function MediaPool({
    * Media on this computer, picked in the system's dialog, copied in or linked where it is kept (a NAS): a card each
    * while it comes. Where there is no dialog, an import is the browser's pick.
    */
-  const bringFrom = async (mode: 'copy' | 'link', folder: boolean, intoRel = at) => {
-    if (!onPick || !onBring) { inputRef.current?.click(); return; }
+  const pickInBrowser = () => new Promise<void>((resolve, reject) => {
+    const input = inputRef.current;
+    if (!input) { reject(new Error(t('assets.uploadFailed'))); return; }
+    const cleanup = () => { input.removeEventListener('change', done); input.removeEventListener('cancel', done); };
+    const done = () => { cleanup(); resolve(); };
+    input.addEventListener('change', done, { once: true });
+    input.addEventListener('cancel', done, { once: true });
+    try { if (typeof input.showPicker === 'function') input.showPicker(); else input.click(); }
+    catch { cleanup(); reject(new Error(t('assets.uploadFailed'))); }
+  });
+  async function runPicker<T>(title: string, pick: () => Promise<T>, fallback = t('assets.uploadFailed')): Promise<T | undefined> {
+    // A ref closes the gap before React paints the disabled buttons, including
+    // repeated clicks from another menu entry in the same event turn.
+    if (pickerPendingRef.current) return undefined;
+    pickerPendingRef.current = true;
+    setPickerPending(title);
     setNotice(null);
-    const paths = await onPick(t(mode === 'copy' ? 'media.pickImport' : folder ? 'media.pickLinkFolder' : 'media.pickLink'), folder);
-    if (paths === 'no-dialog') { if (mode === 'copy' && !folder) inputRef.current?.click(); else setNotice(t('media.noDialog')); return; }
+    try { return await pick(); }
+    catch (e) { setNotice(e instanceof Error && e.message ? e.message : fallback); return undefined; }
+    finally { pickerPendingRef.current = false; setPickerPending(null); }
+  }
+  const bringFrom = async (mode: 'copy' | 'link', folder: boolean, intoRel = at) => {
+    const title = t(mode === 'copy' ? 'media.pickImport' : folder ? 'media.pickLinkFolder' : 'media.pickLink');
+    const paths = await runPicker(title, async () => {
+      const selected = onPick && onBring ? await onPick(title, folder) : 'no-dialog';
+      if (selected !== 'no-dialog') return selected;
+      if (mode === 'copy' && !folder) await pickInBrowser();
+      else setNotice(t('media.noDialog'));
+      return [];
+    });
+    if (!paths?.length || !onBring) return;
     const batch: Upload[] = paths.map((path) => {
       const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
       return { id: `upload-${++uploadSeq}`, name, into: intoRel, kind: folder ? 'other' : resourceKindOf(name), ratio: -1 };
     });
     setUploads((all) => [...all, ...batch]);
+    const taskId = crypto.randomUUID(), name = `导入${paths.length}个媒体${folder ? '文件夹' : '文件'}`;
+    let completed = 0, failed = false;
+    const report = (status: 'queued' | 'running' | 'succeeded' | 'failed') => notifyManagedImport(projectId, { id: taskId, name, status, progress: completed / paths.length });
+    report('queued'); report('running');
     for (const [i, path] of paths.entries()) {
       const id = batch[i]!.id;
       try {
@@ -399,10 +439,13 @@ export function MediaPool({
         const [landed] = await onBring([path], folderPath(intoRel), mode);
         setUploads((all) => all.map((u) => (u.id === id ? { ...u, ratio: 1, ...(landed ? { landed } : {}) } : u)));
       } catch (e) {
+        failed = true;
         setNotice(e instanceof Error && e.message ? e.message : t('assets.uploadFailed'));
         dropUploads((u) => u.id === id);
       }
+      completed++; report('running');
     }
+    report(failed ? 'failed' : 'succeeded');
   };
   /** Take cards away (a picture's preview let go with them). */
   const dropUploads = React.useCallback((gone: (u: Upload) => boolean) => {
@@ -562,7 +605,8 @@ export function MediaPool({
     if (!link) return [];
     return [
       ...(onReveal && !link.missing ? [{ id: 'reveal-original', label: t('media.revealOriginal'), icon: <ExternalLink size={14} />, onSelect: () => onReveal(key, true) }] : []),
-      ...(onRelink ? [{ id: 'relink', label: t('media.relink'), icon: <Link2 size={14} />, onSelect: () => { void onRelink(key, folder).then((r) => { if (r !== 'ok') setNotice(t('media.relinkFailed')); }); } }] : []),
+      ...(onRelink ? [{ id: 'relink', label: t('media.relink'), icon: <Link2 size={14} />, disabled: Boolean(pickerPending), hint: pickerPending ? t('projects.fetch.phase.copy') : undefined,
+        onSelect: () => { void runPicker(t('media.pickRelink'), () => onRelink(key, folder), t('media.relinkFailed')).then((r) => { if (r !== undefined && r !== 'ok') setNotice(t('media.relinkFailed')); }); } }] : []),
       ...(onCollect && !link.missing ? [{ id: 'collect', label: t('media.collect'), note: t('media.collectNote'), icon: <HardDriveDownload size={14} />, onSelect: () => { void collectAll([key]); } }] : []),
       { id: 'link-sep', separator: true } as const,
     ];
@@ -629,16 +673,16 @@ export function MediaPool({
   /* what Upload offers: a copy in the project, or a link to where the media is kept (a NAS, another disk); where
      nothing is linked (Saved), Upload picks the files to copy in at once */
   const importMenu: ContextMenuEntry[] = [
-    { id: 'import', label: t('media.importFiles'), note: t('media.importFilesNote'), icon: <Upload size={14} />, onSelect: () => { void bringFrom('copy', false); } },
-    { id: 'link', label: t('media.linkFiles'), note: t('media.linkFilesNote'), icon: <Link2 size={14} />, onSelect: () => { void bringFrom('link', false); } },
-    { id: 'link-folder', label: t('media.linkFolder'), icon: <FolderSymlink size={14} />, onSelect: () => { void bringFrom('link', true); } },
+    { id: 'import', label: t('media.importFiles'), note: t('media.importFilesNote'), icon: <Upload size={14} />, disabled: Boolean(pickerPending), hint: pickerPending ? t('projects.fetch.phase.copy') : undefined, onSelect: () => { void bringFrom('copy', false); } },
+    { id: 'link', label: t('media.linkFiles'), note: t('media.linkFilesNote'), icon: <Link2 size={14} />, disabled: Boolean(pickerPending), hint: pickerPending ? t('projects.fetch.phase.copy') : undefined, onSelect: () => { void bringFrom('link', false); } },
+    { id: 'link-folder', label: t('media.linkFolder'), icon: <FolderSymlink size={14} />, disabled: Boolean(pickerPending), hint: pickerPending ? t('projects.fetch.phase.copy') : undefined, onSelect: () => { void bringFrom('link', true); } },
   ];
   const blankMenu: ContextMenuEntry[] = [
     { id: 'new-folder', label: t('assets.newFolder'), icon: <FolderPlus size={14} />, onSelect: () => setCreating(true) },
-    { id: 'import', label: t('media.import'), icon: <Plus size={14} />, onSelect: () => (onPick && onBring ? void bringFrom('copy', false) : inputRef.current?.click()) },
+    { id: 'import', label: t('media.import'), icon: <Plus size={14} />, disabled: Boolean(pickerPending), hint: pickerPending ? t('projects.fetch.phase.copy') : undefined, onSelect: () => { void bringFrom('copy', false); } },
     ...(onPick && onBring && links ? [
-      { id: 'link', label: t('media.linkFiles'), icon: <Link2 size={14} />, onSelect: () => { void bringFrom('link', false); } },
-      { id: 'link-folder', label: t('media.linkFolder'), icon: <FolderSymlink size={14} />, onSelect: () => { void bringFrom('link', true); } },
+      { id: 'link', label: t('media.linkFiles'), icon: <Link2 size={14} />, disabled: Boolean(pickerPending), hint: pickerPending ? t('projects.fetch.phase.copy') : undefined, onSelect: () => { void bringFrom('link', false); } },
+      { id: 'link-folder', label: t('media.linkFolder'), icon: <FolderSymlink size={14} />, disabled: Boolean(pickerPending), hint: pickerPending ? t('projects.fetch.phase.copy') : undefined, onSelect: () => { void bringFrom('link', true); } },
     ] : []),
   ];
   /** The bar button a menu hangs from: a press on it is not outside the menu, and a click on it closes the menu. */
@@ -890,9 +934,10 @@ export function MediaPool({
         {/* bringing media in is what this pane is for: the one labeled button, right after the search */}
         <Tooltip label={t('media.import')} side="bottom">
           <button type="button" aria-label={t('media.import')} aria-haspopup={onPick && onBring ? 'menu' : undefined}
-            onClick={(e) => (onPick && onBring ? (links ? barMenu(e, importMenu) : void bringFrom('copy', false)) : inputRef.current?.click())}
-            className={`flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md bg-[var(--bg-pressed)] text-[12.5px] font-medium text-[var(--text)] transition hover:bg-[var(--border-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--border-strong)] ${bar.uploadWord ? 'px-2.5' : 'w-7'}`}>
-            <Upload size={13} strokeWidth={2.2} />
+            disabled={Boolean(pickerPending)} aria-busy={Boolean(pickerPending)}
+            onClick={(e) => (onPick && onBring && links ? barMenu(e, importMenu) : void bringFrom('copy', false))}
+            className={`flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md bg-[var(--bg-pressed)] text-[12.5px] font-medium text-[var(--text)] transition hover:bg-[var(--border-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--border-strong)] disabled:cursor-wait disabled:opacity-60 ${bar.uploadWord ? 'px-2.5' : 'w-7'}`}>
+            {pickerPending ? <LoaderCircle size={13} className="animate-spin" /> : <Upload size={13} strokeWidth={2.2} />}
             {bar.uploadWord ? uploadWord : null}
           </button>
         </Tooltip>
@@ -946,8 +991,14 @@ export function MediaPool({
         )}
       </div>
 
+      {pickerPending ? (
+        <div role="status" aria-live="polite" className="mx-2.5 mb-2 flex shrink-0 items-center gap-2 rounded-md bg-[var(--bg-hover)] px-2 py-1.5 text-[12px] text-[var(--text-muted)]">
+          <LoaderCircle size={13} className="shrink-0 animate-spin" />
+          <span className="min-w-0">{t('projects.fetch.phase.copy')}<span className="ml-1.5 text-[var(--text-faint)]">{pickerPending}</span></span>
+        </div>
+      ) : null}
       {notice ? (
-        <div className="mx-2.5 mb-2 flex shrink-0 items-start gap-2 rounded-md bg-[var(--bg-hover)] px-2 py-1.5 text-[12px] text-[var(--text-muted)]">
+        <div role="alert" className="mx-2.5 mb-2 flex shrink-0 items-start gap-2 rounded-md bg-[var(--bg-hover)] px-2 py-1.5 text-[12px] text-[var(--text-muted)]">
           <span className="min-w-0 flex-1">{notice}</span>
           <button type="button" aria-label={t('media.dismiss')} onClick={() => setNotice(null)}><X size={12} /></button>
         </div>
@@ -978,9 +1029,9 @@ export function MediaPool({
               <Clapperboard size={22} className="text-[var(--text-faint)]" />
               <div className="text-[13px] font-medium text-[var(--text)]">{t(at ? 'media.emptyFolder' : inSaved ? 'saved.emptyTitle' : 'media.emptyTitle')}</div>
               {at ? null : <p className="max-w-[30ch] text-[12px] leading-relaxed text-[var(--text-muted)]">{t(inSaved ? 'saved.emptyBody' : 'media.emptyBody')}</p>}
-              <button type="button" onClick={() => (onPick && onBring ? void bringFrom('copy', false) : inputRef.current?.click())}
-                className="mt-1 inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 text-[12.5px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)]">
-                <Plus size={13} />{t('media.import')}
+              <button type="button" disabled={Boolean(pickerPending)} aria-busy={Boolean(pickerPending)} onClick={() => { void bringFrom('copy', false); }}
+                className="mt-1 inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 text-[12.5px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] disabled:cursor-wait disabled:opacity-60">
+                {pickerPending ? <LoaderCircle size={13} className="animate-spin" /> : <Plus size={13} />}{t('media.import')}
               </button>
             </div>
           )
