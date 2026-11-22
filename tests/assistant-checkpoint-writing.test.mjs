@@ -47,6 +47,26 @@ test('writing window snapshots use the actual channel, UTF-16 leaf and saved ver
   assert.equal(current.selection, null); assert.equal(current.output.body, '已经改写的新内容'); assert.ok(current.selectionNotice);
 });
 
+test('a pending tail restriction survives restart when the native timeline was initially unavailable', async t => {
+  let nativeAvailable = false;
+  const fx = await fixture(t, { kind: 'video', video: { timeline: [] } }, { openFilm: {
+    context: async () => {
+      if (!nativeAvailable) throw Object.assign(new Error('native temporarily unavailable'), { status: 503 });
+      return { assets: [], timeline: [], duration: 100, revision: 'native-tail-1' };
+    },
+  } });
+  const ctx = { ...fx.ctx, instruction: '只修改最后10秒，其他片段保持原样。' }, first = fx.adapter();
+  const initial = await first.buildContext(ctx);
+  assert.equal(initial.native.available, false);
+  const checkpoint = JSON.parse(JSON.stringify(await first.checkpoint(ctx)));
+  assert.equal(checkpoint.pendingScope, 'tail');
+  await first.close(); nativeAvailable = true;
+  const restored = fx.adapter(); await restored.restoreCheckpoint(ctx, checkpoint);
+  const resumed = await restored.buildContext(ctx);
+  assert.deepEqual(resumed.editScope.placement, { mode: 'range', start: 90, end: 100 });
+  await assert.rejects(fx.call(restored, 'native_scope_set', { placement: { mode: 'range', start: 80, end: 100 } }, ctx), { code: 'ASSISTANT_DIALOG_SCOPE' });
+});
+
 test('explicit selected-only dialogue writes only its real selection, while current dialogue supersedes the old brief goal', async t => {
   const output = article('第一段。第二段。'), calls = [];
   const fx = await fixture(t, { outputs: { article: output }, writing: { brief: { goal: '旧的招生目标', channel: 'article' }, draft: { channel: 'article', output } } }, {
