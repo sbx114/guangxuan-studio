@@ -220,6 +220,24 @@ for (const mode of ['fix-then-pass', 'unavailable', 'still-blocking']) test('fre
   else { assert.equal(rendered, 1); assert.equal(appended, 1); if (mode === 'fix-then-pass') { assert.equal(generated, 2); assert.match(inputs[1].diagnostics, /收回标题/); assert.equal(result.data.review.verdict, 'pass'); } else { assert.equal(generated, 1); assert.match(result.summary, /未完成有效视觉复核/); } }
 });
 
+test('review forwards targeted composition-time comparisons to the current owned source without a write', async t => {
+  const calls = [], requests = [{ kind: 'ending', shotId: 'last-shot', times: [29.15, 29.966], reason: '核对片尾实际淡出' }];
+  const fx = await fixture(t, { kind: 'video', services: { remotion: { review: async (...args) => {
+    calls.push(args); return { status: 'reviewed', verdict: 'pass', revision: 4, frames: [{ frame: 875 }, { frame: 899 }], summary: '已复核片尾对照。' };
+  } } } });
+  const ctx = fx.context({ mode: 'ask' }), before = await fx.store.read(fx.project.id);
+  const result = await fx.call('remotion_review', { remotionId: 'current-source', expectedRevision: 4, compositionId: 'FreeComposition', samplingRequests: requests }, ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], fx.project.id);
+  assert.equal(calls[0][1], 'current-source');
+  assert.equal(calls[0][2].expectedRevision, 4);
+  assert.deepEqual(calls[0][2].samplingRequests, requests);
+  assert.equal(calls[0][2].signal, ctx.signal);
+  assert.equal(result.data.frames.at(-1).frame, 899);
+  assert.deepEqual(await fx.store.read(fx.project.id), before);
+  assert.deepEqual(result.effects || [], []);
+});
+
 test('knowledge_generate uses current selected units, live shared profiles and density and stores no profile copies', async t => {
   const input = singleGuideInput(), contextCalls = [], libraryCalls = [], aiCalls = [];
   const selection = { documentId: input.document.documentId, unitIds: ['page1'] };

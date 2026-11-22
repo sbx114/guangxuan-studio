@@ -184,3 +184,153 @@ test('two actual reads of the same immutable source revision can both support th
   record(value, 'remotion_code_search', { data: { remotionId: 'free-a', revision: 2 } }, { remotionId: 'free-a' });
   assert.equal(first.stale, undefined); assert.equal(buildAssistantReport(value, { executionExpected: true, final: { noChangeNeeded: { evidenceIds: [first.id] } } }).outcome, 'unchanged');
 });
+
+test('a visible issue remains unfinished after a source repair until the current version is reviewed', () => {
+  const value = job(); record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'revise', revision: 2,
+    frames: [{ frame: 30 }, { frame: 60 }], summary: '光迹方向反了；音轨未检查。', limitations: '只检查采样图，未检查音轨。',
+    issues: [{ severity: 'polish', frame: 30, evidenceFrames: [30, 60], category: 'motion', detail: '光迹从花心向外移动。', fix: '把光迹移动方向改为指向花心。',
+      action: { operation: 'adjust-source', file: 'src/index.tsx', component: 'LightShot', instruction: '按当前源码反转光迹的插值方向。' } }],
+  } }, { remotionId: 'free-a' });
+  let report = buildAssistantReport(value, { executionExpected: true });
+  assert.equal(report.outcome, 'partial'); const issue = report.unfinished.find(item => item.code === 'CHECK_NOT_PASSED');
+  assert.equal(issue.label, '光迹从花心向外移动。'); assert.deepEqual(issue.frames, [30, 60]); assert.equal(issue.resourceKey, 'remotion:fixture-project:free-a');
+  assert.deepEqual(issue.actions, ['按当前源码反转光迹的插值方向。']); assert.equal(issue.issues[0].action.file, 'src/index.tsx');
+  assert.ok(report.limitations.some(item => /未检查音轨/.test(item.label))); assert.ok(!report.unfinished.some(item => /音轨/.test(item.label)));
+  record(value, 'remotion_source_update', saved(3), { remotionId: 'free-a' }, { mutating: true });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial');
+  const stale = report.unfinished.find(item => item.code === 'VERIFICATION_STALE'); assert.equal(stale.revision, 2); assert.equal(stale.superseded, true);
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 3, frames: [{ frame: 30 }, { frame: 60 }], summary: '光迹已指向花心。', limitations: '仅采样图；音轨未检查。' } }, { remotionId: 'free-a' });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+});
+
+test('ordinary sampling boundaries do not imply unfinished work but a required concrete check does', () => {
+  const value = job(); record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  const review = { status: 'reviewed', verdict: 'pass', revision: 2, frames: [{ frame: 30 }], summary: '当前采样画面清楚。', limitations: '未听音轨，不保证未采样帧。',
+    coverage: { plannedShots: 2, sampledShots: 1, sampledShotIds: ['main'], omittedShotIds: ['ending'], holdPairs: 0, transitionPairs: 0, samplingMode: 'shot-coverage-first' } };
+  record(value, 'remotion_review', { data: review }, { remotionId: 'free-a' });
+  let report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+  record(value, 'remotion_review', { data: { ...review, verificationNeeds: [
+    { kind: 'ending', times: [28, 29.9], shotId: 'ending', reason: '本轮明确要求的片尾淡出仍缺少前后对照。', required: true },
+    { kind: 'audio', times: [0, 30], reason: '音轨未检查。', required: true },
+    { kind: 'hold', times: [25, 26], reason: '可选停留研究。', required: false },
+  ] } }, { remotionId: 'free-a' });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial');
+  const pending = report.unfinished.find(item => item.code === 'CHECK_NOT_PASSED');
+  assert.equal(pending.label, '本轮明确要求的片尾淡出仍缺少前后对照。'); assert.equal(pending.verificationNeeds.length, 1);
+  assert.deepEqual(pending.verificationNeeds[0].times, [28, 29.9]); assert.ok(pending.actions[0].includes('28、29.9秒'));
+  record(value, 'remotion_review', { data: { ...review, frames: [{ frame: 840, time: 28 }, { frame: 897, time: 29.9 }],
+    sampleGroups: [{ kind: 'ending', shotId: 'ending', frames: [840, 897] }], summary: '片尾前后对照通过。' } }, { remotionId: 'free-a' });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+});
+
+test('an unrelated object success using the same tool cannot erase an unresolved failure', () => {
+  const value = job(); recordAssistantResult(value, { tool: 'remotion_source_update', toolId: 'failed-a', args: { remotionId: 'free-a' }, error: { code: 'SOURCE_WRITE_FAILED', message: 'A工程写入失败。' } });
+  record(value, 'remotion_source_update', { ...saved(2), data: { id: 'free-b', revision: 2 } }, { remotionId: 'free-b' }, { mutating: true });
+  let report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial'); assert.ok(report.unfinished.some(item => item.code === 'SOURCE_WRITE_FAILED'));
+  record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+});
+
+test('restored reports preserve actionable checked frames and bounded verification needs', () => {
+  const value = job(); record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'revise', revision: 2, frames: [{ frame: 30 }, { frame: 60 }],
+    issues: [{ severity: 'polish', frame: 30, evidenceFrames: [30, 60, 999], detail: '方向不符合本轮要求。', fix: '修改当前光迹方向。' },
+      { severity: 'blocking', frame: 999, detail: '未采样帧不能制造可见问题。' }],
+    verificationNeeds: [{ kind: 'hold', times: [8, 9], reason: '需要核对本轮要求的落定停留。', required: true }, { kind: 'ending', times: [1, Infinity], reason: '无效时间。', required: true }],
+    limitations: '仅实际采样范围。', coverage: { holdPairs: 0, omittedShotIds: ['hold'] },
+  } }, { remotionId: 'free-a' });
+  buildAssistantReport(value, { executionExpected: true });
+  const restored = restoreAssistantTaskState(JSON.parse(JSON.stringify(value))), pending = restored.report.unfinished.find(item => item.code === 'CHECK_NOT_PASSED');
+  assert.deepEqual(pending.frames, [30, 60]); assert.equal(pending.issues.length, 1); assert.deepEqual(pending.issues[0].evidenceFrames, [30, 60]);
+  assert.equal(pending.verificationNeeds.length, 1); assert.deepEqual(pending.verificationNeeds[0].times, [8, 9]);
+  assert.ok(pending.actions.some(action => /光迹方向/.test(action))); assert.equal(restored.report.limitations.length, 2);
+  assert.deepEqual(restored.evidence.entries.at(-1).coverage.omittedShotIds, ['hold']);
+});
+
+test('a fresh matching verification clears a completed plan old reference without unrelated evidence hiding it', () => {
+  const value = job(); record(value, 'remotion_inspect', { data: { compositions: [{ id: 'Main' }], revision: 1 } }, { remotionId: 'free-a' });
+  const original = value.evidence.entries.at(-1);
+  updateAssistantPlan(value, { items: [planItem({ kind: 'verify', label: '检查A工程编译', status: 'completed', evidenceIds: [original.id] })] });
+  record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  record(value, 'remotion_inspect', { data: { compositions: [{ id: 'Other' }], revision: 2 } }, { remotionId: 'free-b' });
+  let report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial'); assert.ok(report.unfinished.some(item => item.code === 'VERIFICATION_STALE'));
+  record(value, 'remotion_inspect', { data: { compositions: [{ id: 'Main' }], revision: 2 } }, { remotionId: 'free-a' });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+  assert.deepEqual(value.plan.items[0].evidenceIds, [original.id], 'Historical plan references remain auditable');
+});
+
+test('a same-revision pass on unrelated frames cannot erase an observed issue', () => {
+  const value = job(); record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'revise', revision: 2, frames: [{ frame: 30, time: 1 }, { frame: 60, time: 2 }],
+    issues: [{ severity: 'polish', frame: 30, evidenceFrames: [30, 60], detail: '实际光迹方向错误。', fix: '修正方向。' }] } }, { remotionId: 'free-a' });
+  const observed = value.evidence.entries.at(-1);
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: [{ frame: 300, time: 10 }, { frame: 330, time: 11 }], summary: '另一镜头采样通过。' } }, { remotionId: 'free-a' });
+  let report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial');
+  const pending = report.unfinished.find(item => item.evidenceId === observed.id); assert.equal(pending.code, 'CHECK_NOT_PASSED'); assert.deepEqual(pending.frameSamples, [{ frame: 30, time: 1 }, { frame: 60, time: 2 }]);
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: [{ frame: 30, time: 1 }, { frame: 60, time: 2 }], summary: '原问题帧对通过。' } }, { remotionId: 'free-a' });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+});
+
+test('required comparison groups use real frame times and the matching group instead of declared coverage counts', () => {
+  const value = job(); record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: [{ frame: 30, time: 1 }],
+    verificationNeeds: [{ kind: 'ending', shotId: 'final', times: [28, 29.9], reason: '本轮要求的片尾对照还未取得。', required: true }] } }, { remotionId: 'free-a' });
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: [{ frame: 30, time: 1 }, { frame: 60, time: 2 }],
+    coverage: { endingPairs: 1, includesFinalFrame: true }, sampleGroups: [{ kind: 'ending', shotId: 'final', frames: [30, 60] }] } }, { remotionId: 'free-a' });
+  assert.equal(buildAssistantReport(value, { executionExpected: true }).outcome, 'partial');
+  const actual = [{ frame: 840, time: 28 }, { frame: 897, time: 29.9 }];
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: actual,
+    sampleGroups: [{ kind: 'hold', shotId: 'final', frames: [840, 897] }] } }, { remotionId: 'free-a' });
+  assert.equal(buildAssistantReport(value, { executionExpected: true }).outcome, 'partial');
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: actual,
+    sampleGroups: [{ kind: 'ending', shotId: 'other', frames: [840, 897] }] } }, { remotionId: 'free-a' });
+  assert.equal(buildAssistantReport(value, { executionExpected: true }).outcome, 'partial');
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: actual,
+    sampleGroups: [{ kind: 'ending', shotId: 'final', frames: [840, 897] }] } }, { remotionId: 'free-a' });
+  const report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+});
+
+test('partial frame rechecks preserve only unresolved observed issues through restore', () => {
+  const value = job(); record(value, 'remotion_source_update', saved(2), { remotionId: 'free-a' }, { mutating: true });
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'revise', revision: 2, frames: [{ frame: 30, time: 1 }, { frame: 60, time: 2 }],
+    issues: [{ severity: 'polish', frame: 30, detail: '第一个已知问题。', fix: '修正第一个。' }, { severity: 'polish', frame: 60, detail: '第二个已知问题。', fix: '修正第二个。' }] } }, { remotionId: 'free-a' });
+  const original = value.evidence.entries.at(-1);
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 2, frames: [{ frame: 30, time: 1 }] } }, { remotionId: 'free-a' });
+  let report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial');
+  assert.deepEqual(report.unfinished.find(item => item.evidenceId === original.id).issues.map(issue => issue.frame), [60]);
+  const restored = restoreAssistantTaskState(JSON.parse(JSON.stringify(value)));
+  assert.deepEqual(restored.report.unfinished.find(item => item.evidenceId === original.id).issues.map(issue => issue.frame), [60]);
+  record(value, 'remotion_source_update', saved(3), { remotionId: 'free-a' }, { mutating: true });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial');
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'pass', revision: 3, frames: [{ frame: 90, time: 3 }, { frame: 120, time: 4 }], summary: '实际新源码版本已重新检查。' } }, { remotionId: 'free-a' });
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'complete'); assert.deepEqual(report.unfinished, []);
+});
+
+test('a read-only visual evaluation finishes with findings rather than unauthorized repair duties', () => {
+  const value = job(); value.mode = 'ask';
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'revise', revision: 2, frames: [{ frame: 30, time: 1 }, { frame: 60, time: 2 }],
+    issues: [{ severity: 'polish', frame: 30, evidenceFrames: [30, 60], detail: '评估发现光迹方向反了。', fix: '可考虑修正移动方向。' }], limitations: '只检查实际采样；未听音轨。' } }, { remotionId: 'free-a' });
+  const review = value.evidence.entries.at(-1);
+  updateAssistantPlan(value, { items: [planItem({ kind: 'verify', label: '评估当前采样画面', status: 'completed', evidenceIds: [review.id] })] });
+  let report = buildAssistantReport(value, { executionExpected: false });
+  assert.equal(report.outcome, 'answer'); assert.deepEqual(report.unfinished, []); assert.deepEqual(report.executed, []);
+  assert.equal(report.findings[0].label, '评估发现光迹方向反了。'); assert.deepEqual(report.findings[0].frames, [30, 60]);
+  assert.equal(report.verified.includes(review.id), false, 'A completed evaluation is not a visual quality pass');
+  assert.equal(value.mode, 'ask'); assert.deepEqual(value.effects, []);
+  const restored = restoreAssistantTaskState(JSON.parse(JSON.stringify(value))); assert.equal(restored.report.findings[0].evidenceId, review.id);
+  report = buildAssistantReport(value, { executionExpected: true }); assert.equal(report.outcome, 'partial'); assert.ok(report.unfinished.some(item => item.code === 'CHECK_NOT_PASSED'));
+});
+
+test('read-only evaluation still exposes required missing comparisons and unavailable review services', () => {
+  const value = job(); value.mode = 'ask';
+  record(value, 'remotion_review', { data: { status: 'reviewed', verdict: 'revise', revision: 2, frames: [{ frame: 30, time: 1 }, { frame: 60, time: 2 }],
+    issues: [{ severity: 'polish', frame: 30, detail: '已读画面中发现一处问题。', fix: '修改这个元素。' }],
+    verificationNeeds: [{ kind: 'ending', shotId: 'final', times: [28, 29.9], reason: '本次要求的片尾评价仍缺实际对照。', required: true }],
+  } }, { remotionId: 'free-a' });
+  let report = buildAssistantReport(value, { executionExpected: false }); assert.equal(report.outcome, 'partial'); assert.equal(report.findings.length, 1);
+  const pending = report.unfinished.find(item => item.code === 'CHECK_NOT_PASSED'); assert.equal(pending.label, '本次要求的片尾评价仍缺实际对照。');
+  assert.equal(pending.issues, undefined); assert.ok(pending.actions.every(action => !/修改这个元素/.test(action)));
+  record(value, 'remotion_review', { data: { status: 'unavailable', verdict: 'unknown', revision: 2, frames: [{ frame: 840, time: 28 }], summary: '模型未接受图片。' } }, { remotionId: 'free-a' });
+  report = buildAssistantReport(value, { executionExpected: false }); assert.equal(report.outcome, 'partial'); assert.ok(report.unfinished.some(item => /模型未接受/.test(item.label)));
+});
