@@ -60,7 +60,7 @@ function editor(draft) {
   return `<div class="writing-editor">${content}<div class="writing-editor-actions"><span>直接编辑会自动保存</span><button class="btn small" type="button" data-writing-finish-edit>${icon('check')}保存并预览</button></div></div>`;
 }
 
-export function createWritingWorkspace({ saveProject, callAi, requireConnection, onNew, onMetadata, onExport } = {}) {
+export function createWritingWorkspace({ saveProject, callAi, requireConnection, onNew, onMetadata, onExport, onAssistant } = {}) {
   if (!document.querySelector('link[data-writing-workspace-style]')) { const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '/writing-workspace.css'; link.dataset.writingWorkspaceStyle = ''; document.head.append(link); }
   const sessions = new Map(), pendingSaves = new Set(); let active = null, disposed = false;
   const live = session => !disposed && active?.session === session && active.host.isConnected;
@@ -86,6 +86,19 @@ export function createWritingWorkspace({ saveProject, callAi, requireConnection,
   function syncOutput(project) { const draft = project.writing.draft; if (!validDraft(draft)) return; project.outputs ||= {}; project.outputs[draft.channel] = draft.output; project.review = null; }
   function setDraft(session, draft, { previous = true } = {}) { const project = session.project; if (previous && validDraft(project.writing.draft)) project.writing.previousDraft = clone(project.writing.draft); project.writing.draft = clone(draft); project.sourceChanged = Boolean(draft.sourceFingerprint && draft.sourceFingerprint !== sourceFingerprint(project)); syncOutput(project); session.proposal = null; session.selection = null; session.editSnapshot = false; session.editing = false; touch(session); }
   function currentDraft(session) { return session.project.writing.draft; }
+  async function assistantContext(session) {
+    await flushSession(session);
+    if (!allowed(session)) throw aborted();
+    const draft = currentDraft(session), context = { writingRevision: Number.isSafeInteger(session.project.writingRevision) ? session.project.writingRevision : 0 };
+    if (!validDraft(draft)) return null;
+    context.channel = draft.channel;
+    const bytes = new TextEncoder().encode(JSON.stringify(draft.output));
+    context.outputFingerprint = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(value => value.toString(16).padStart(2, '0')).join('');
+    const selection = session.selection, leaf = selection?.path?.length === 1 ? draft.output[selection.path[0]] : null;
+    if (selection && typeof leaf === 'string' && Number.isInteger(selection.start) && Number.isInteger(selection.end) && selection.start >= 0 && selection.end > selection.start && leaf.slice(selection.start, selection.end) === selection.text)
+      context.selection = { path: [...selection.path], start: selection.start, end: selection.end, text: selection.text };
+    return context;
+  }
   function noticeHtml(session) {
     const notices = [session.error, session.saveError].filter(Boolean);
     return `${notices.length ? `<div class="writing-notice is-error" role="status">${icon('info')}<div>${notices.map(value => `<p>${h(value)}</p>`).join('')}<div class="writing-notice-actions">${session.saveError ? '<button class="btn small" type="button" data-writing-retry-save>重试保存</button>' : ''}${session.latestProject ? '<button class="btn small" type="button" data-writing-load-latest>加载较新版本</button>' : ''}</div></div></div>` : ''}${session.localRecovery ? '<div class="writing-notice"><span>已加载较新版本，本机未保存内容仍可恢复。</span><button class="btn small" type="button" data-writing-restore-local>恢复本机编辑</button></div>' : ''}${session.proposal ? `<div class="writing-notice"><span>${icon('spark')}新稿已就绪，当前编辑已保留。</span><button class="btn small" type="button" data-writing-view-proposal>查看新稿</button></div>` : ''}${session.importProposal ? `<div class="writing-notice"><span>文件已解析，当前材料已保留。</span><button class="btn small" type="button" data-writing-apply-import>追加文件内容</button></div>` : ''}`;
@@ -101,6 +114,7 @@ export function createWritingWorkspace({ saveProject, callAi, requireConnection,
     busy.querySelector('[data-writing-cancel]')?.addEventListener('click', () => session.controller?.abort()); busy.querySelector('[data-writing-cancel-import]')?.addEventListener('click', () => session.importController?.abort());
     root.querySelectorAll('[data-writing-quick],[data-writing-revise]').forEach(button => { button.disabled = session.busy || !draft || button.hasAttribute('data-writing-revise') && !project.writing.revisionInstruction.trim(); });
     root.querySelectorAll('[data-writing-copy],[data-writing-export],[data-writing-edit]').forEach(button => { button.disabled = !draft; });
+    const assistant = root.querySelector('[data-writing-assistant]'); if (assistant) assistant.disabled = session.busy || session.importing || session.openingAssistant;
     const undo = root.querySelector('[data-writing-undo]'); if (undo) { undo.hidden = !validDraft(project.writing.previousDraft); undo.disabled = session.busy; }
     const selection = root.querySelector('[data-writing-selection]'); if (selection) { selection.innerHTML = session.selection ? `<span>仅精修选中的${Array.from(session.selection.text).length}字</span><button type="button" data-writing-clear-selection aria-label="取消仅精修选中段落">${icon('close')}</button>` : ''; selection.hidden = !session.selection; selection.querySelector('button')?.addEventListener('click', () => { session.selection = null; update(session); }); }
     const feedback = root.querySelector('[data-writing-feedback]'); feedback.innerHTML = noticeHtml(session); bindFeedback(session, feedback);
@@ -150,6 +164,18 @@ export function createWritingWorkspace({ saveProject, callAi, requireConnection,
   }
   function bind(session) {
     const root = active.host, project = session.project;
+    if (onAssistant) {
+      root.querySelector('.writing-heading-actions').insertAdjacentHTML('beforeend', `<button class="btn small writing-assistant-entry" type="button" data-writing-assistant aria-haspopup="dialog">${icon('spark')}AI 助手</button>`);
+      root.querySelector('[data-writing-assistant]').onclick = async () => {
+        if (session.busy || session.importing || session.openingAssistant) return;
+        session.openingAssistant = true; update(session);
+        try {
+          const context = await assistantContext(session);
+          if (live(session)) await onAssistant({ projectId: project.id, windowKind: 'writing', writingContext: context, getWritingContext: () => assistantContext(session) });
+        } catch (error) { session.error = error.message; }
+        finally { session.openingAssistant = false; update(session); }
+      };
+    }
     root.querySelector('[data-writing-new]').onclick = () => onNew?.(); root.querySelector('[data-writing-save]').onclick = () => { void flushSession(session).catch(() => {}); };
     root.querySelector('[data-writing-title]').onchange = async event => { const title = event.target.value.trim(); if (!title) { event.target.value = project.title; return; } try { if (onMetadata) { const result = await onMetadata(project.id, { title }); project.title = result?.title || title; } else { project.title = title; touch(session); } } catch (error) { session.error = error.message; update(session); } };
     root.querySelectorAll('[data-writing-brief]').forEach(input => input.oninput = () => { const key = input.dataset.writingBrief; project.writing.brief[key] = key === 'channel' ? channelOf(input.value) : input.value || (['audience', 'scenario', 'length'].includes(key) ? 'auto' : ''); touch(session); root.querySelectorAll('[data-writing-scenario]').forEach(button => button.setAttribute('aria-pressed', String(project.writing.brief.scenario === button.dataset.writingScenario))); });

@@ -20,6 +20,10 @@ const unwrap = response => response?.job || response;
 export async function startAssistantRun(payload) { const result = await api('/api/assistant/runs', payload); return { runId: result.runId || result.job?.id, job: unwrap(result) }; }
 export async function getAssistantRun(id, options) { return unwrap(await api(`/api/assistant/runs/${encodeURIComponent(id)}`, undefined, options)); }
 export async function cancelAssistantRun(id) { return unwrap(await api(`/api/assistant/runs/${encodeURIComponent(id)}/cancel`, {})); }
+export async function resumeAssistantRun(id, { settings, writingPreferences } = {}) {
+  const result = await api(`/api/assistant/runs/${encodeURIComponent(id)}/resume`, { settings, writingPreferences });
+  return { runId: result.runId || result.job?.id || id, job: unwrap(result) };
+}
 
 function delay(milliseconds, signal) {
   return new Promise((resolve, reject) => {
@@ -28,12 +32,19 @@ function delay(milliseconds, signal) {
     if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
   });
 }
-export async function watchAssistantRun(id, { onUpdate, signal, initial, interval = 1000 } = {}) {
+export async function watchAssistantRun(id, { onUpdate, onConnection, signal, initial, interval = 1000 } = {}) {
   let job = initial, failures = 0;
   while (true) {
     if (signal?.aborted) throw new DOMException('已停止查看进度', 'AbortError');
-    try { if (!job) job = await getAssistantRun(id, { signal }); failures = 0; }
-    catch (error) { if (error.name === 'AbortError' || ++failures > 3) throw error; await delay(1500, signal); continue; }
+    try { if (!job) job = await getAssistantRun(id, { signal }); }
+    catch (error) {
+      if (error.name === 'AbortError' || [400, 401, 403, 404, 405, 409, 410, 422].includes(error.status) || ['ASSISTANT_RUN_NOT_FOUND', 'INVALID_PROJECT_ID', 'LOCAL_SERVICE_ORIGIN_DENIED'].includes(error.code)) throw error;
+      failures++;
+      const retryInMs = Math.min(10000, 1000 * 2 ** Math.min(failures, 4));
+      await onConnection?.({ status: 'reconnecting', attempts: failures, retryInMs, message: '进度连接暂时断开，正在自动重连；尚未确认任务结束。' });
+      await delay(retryInMs, signal); continue;
+    }
+    if (failures) await onConnection?.({ status: 'connected', attempts: failures }); failures = 0;
     await onUpdate?.(job);
     if (assistantRunFinished(job)) return job;
     await delay(interval, signal); job = null;

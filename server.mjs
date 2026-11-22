@@ -23,6 +23,7 @@ import { createNovelAssetService } from './lib/novel-assets.mjs';
 import { createNovelLibraryService } from './lib/novel-library.mjs';
 import { createAssistantWebService } from './lib/assistant-web.mjs';
 import { createAssistantAgentService } from './lib/assistant-agent.mjs';
+import { normalizeAssistantWritingContext } from './lib/assistant-writing-context.mjs';
 import { createAssistantAppTools } from './lib/assistant-app-tools.mjs';
 import { createAssistantDownloadService } from './lib/assistant-downloads.mjs';
 import { createAssistantMediaUnderstanding } from './lib/assistant-media-understanding.mjs';
@@ -202,7 +203,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
     });
     return assistantTaskQueue;
   }
-  assistant = createAssistantAgentService({ dataDir, webTools: assistantWeb, appTools: assistantApps.tools, buildContext: assistantApps.buildContext, progressContext: assistantApps.progressContext, sensitiveStrings: () => [...sessionSecrets], onJob: assistantJob });
+  assistant = createAssistantAgentService({ dataDir, webTools: assistantWeb, appTools: assistantApps.tools, buildContext: assistantApps.buildContext, progressContext: assistantApps.progressContext, checkpoint: assistantApps.checkpoint, restoreCheckpoint: assistantApps.restoreCheckpoint, sensitiveStrings: () => [...sessionSecrets], onJob: assistantJob });
   for (const job of await assistant.list()) await assistantJob(job);
   async function commitTask(meta, operation) {
     const task = await tasks.create(meta);
@@ -267,17 +268,21 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
           const body = await readJson(req);
           if (body.projectId) {
             validateProjectId(body.projectId);
-            if (!await store.read(body.projectId)) throw new AppError(404, '请先打开仍存在的项目。', 'PROJECT_NOT_FOUND');
+            const project = await store.read(body.projectId);
+            if (!project) throw new AppError(404, '请先打开仍存在的项目。', 'PROJECT_NOT_FOUND');
+            if (body.writingContext != null) body.writingContext = normalizeAssistantWritingContext(body.writingContext, project);
           }
+          else if (body.writingContext != null) throw new AppError(400, '文案助手需要选择当前文案项目。', 'ASSISTANT_WRITING_PROJECT_REQUIRED');
           rememberSecret(body.settings);
           return json(res, 202, await assistant.start(body, { origin: requestUrl.origin }));
         }
         throw new AppError(405, '助手任务不支持此操作。', 'METHOD_NOT_ALLOWED');
       }
-      const assistantMatch = /^\/api\/assistant\/runs\/([a-f0-9-]{36})(?:\/(cancel))?$/.exec(pathname);
+      const assistantMatch = /^\/api\/assistant\/runs\/([a-f0-9-]{36})(?:\/(cancel|resume))?$/.exec(pathname);
       if (assistantMatch) {
         if (!assistantMatch[2] && method === 'GET') return json(res, 200, { job: await assistant.get(assistantMatch[1]) });
-        if (assistantMatch[2] && method === 'POST') { await readJson(req); return json(res, 200, { job: await assistant.cancel(assistantMatch[1]) }); }
+        if (assistantMatch[2] === 'cancel' && method === 'POST') { await readJson(req); return json(res, 200, { job: await assistant.cancel(assistantMatch[1]) }); }
+        if (assistantMatch[2] === 'resume' && method === 'POST') { const body = await readJson(req); rememberSecret(body.settings); return json(res, 202, await assistant.resume(assistantMatch[1], body, { origin: requestUrl.origin })); }
         throw new AppError(405, '助手任务不支持此操作。', 'METHOD_NOT_ALLOWED');
       }
       if (pathname === '/api/assistant/undo' && method === 'POST') return json(res, 200, await assistantApps.undo(await readJson(req), { origin: requestUrl.origin }));

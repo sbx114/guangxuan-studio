@@ -13,4 +13,5 @@
 .writing-proposal-intro{font-size:12px;color:#70755f}.writing-proposal-grid p,.writing-proposal-grid .writing-body-text{font-size:14px;color:#525c48}.writing-proposal-grid>section>h3{font-size:12px;color:#80704f}
 
 .writing-workspace .writing-eyebrow{font-size:11px;color:#806f54}.writing-workspace .writing-footer-note{font-size:11px!important;color:#707761!important}.writing-workspace .writing-tags{color:#7c653f!important}
+.writing-heading-actions{flex-wrap:wrap}.writing-assistant-entry{white-space:nowrap}.writing-assistant-entry:disabled{opacity:.55}
 .writing-reference-toggle{display:flex;align-items:center;gap:8px;font-size:12px;margin:2px 0 14px}.writing-reference-toggle input{width:15px;height:15px;accent-color:#78845f}.writing-references [hidden]{display:none!important}.writing-references select{width:100%;min-width:0;padding:9px 10px;border:1px solid #c9cbbb;background:#faf9f3;color:#4e5747;font:inherit;font-size:13px;border-radius:0}.writing-reference-note,.writing-reference-state{font-size:11px;line-height:1.6;color:#777e6b;margin:4px 0 0}.writing-reference-state{color:#8b6843}.writing-references .writing-field{margin-bottom:13px}

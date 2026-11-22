@@ -50,7 +50,7 @@ test('a second truncated output stops with the original goal and committed chang
 
 for(const status of [401,504])test(`HTTP ${status} is a real failure and never triggers output-length recovery`,async t=>{
   const fx=await fixture(t,()=>({status})),{runId}=await fx.service.start({projectId:'isolated-project',instruction:'调整音量',settings:fx.settings}),job=await finish(fx.service,runId);
-  assert.equal(job.status,'failed');assert.equal(job.error.code,`UPSTREAM_HTTP_${status}`);assert.equal(fx.requests.length,1);assert.equal(fx.applied.length,0);assert.equal(job.responseRecovery,undefined);
+  assert.equal(job.status,'failed');assert.equal(job.error.code,`UPSTREAM_HTTP_${status}`);assert.equal(fx.requests.length,status===504?3:1);assert.equal(fx.applied.length,0);assert.equal(job.responseRecovery,undefined);
 });
 
 test('Stop during the recovery HTTP call aborts it and does not execute or replay writes',async t=>{

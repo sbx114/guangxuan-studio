@@ -24,8 +24,13 @@ test('global and editor assistants run, show sources, stop, resume, retry and pr
   const folder = await mkdtemp(path.join(os.tmpdir(), 'gx-assistant-ui-'));
   const evidence = process.env.GUANGXUAN_ASSISTANT_UI_EVIDENCE ? path.resolve(process.env.GUANGXUAN_ASSISTANT_UI_EVIDENCE) : folder; await mkdir(evidence, { recursive: true });
   const projects = new Map([['video-a', { id: 'video-a', kind: 'video', title: '隔离视频项目', video: { timeline: [], captions: [], script: '原稿' } }], ['writing-a', { id: 'writing-a', kind: 'writing', title: '隔离写作项目', source: { text: '项目材料' } }]]);
-  const runs = new Map([['external-run', {job:{id:'external-run',runId:'external-run',projectId:null,status:'completed',instruction:'从任务中心恢复的外部问答',message:'外部任务已完成，来源可追溯。',steps:[],sources:[{id:'S1',title:'外部任务来源',url:'https://example.com/external'}],effects:[]},count:0}]]), requests = [], undoCalls = [], saveRequests = [];
-  let counter = 0, failNext = false;
+  const runs = new Map([['external-run', {job:{id:'external-run',runId:'external-run',projectId:null,status:'completed',instruction:'从任务中心恢复的外部问答',message:'外部任务已完成，来源可追溯。',steps:[],sources:[{id:'S1',title:'外部任务来源',url:'https://example.com/external'}],effects:[]},count:0}], ['legacy-failed', { job: { id: 'legacy-failed', runId: 'legacy-failed', projectId: 'writing-a', status: 'failed', instruction: '旧版未完成任务', error: { message: '旧任务尚未完成。' }, resumable: false, resumeBlockReason: '旧任务没有可核对的恢复状态，已有结果保留。', steps: [], effects: [], sources: [] }, count: 0 }]]), requests = [], resumeRequests = [], readRequests = [], undoCalls = [], saveRequests = [];
+  let counter = 0, failNext = false, effectWrites = 0;
+  const writeOnce = run => {
+    if (run.written || !run.job.projectId || run.job.mode !== 'auto' || !/修改/.test(run.job.instruction)) return;
+    const project = projects.get(run.job.projectId); project.outputs = { article: { title: '服务器新文案', body: '保留服务器修改' } }; run.written = true; effectWrites++;
+    run.job.effects = [{ type: 'project', projectId: project.id, changed: true, label: '已更新文案', undo: { kind: 'project', id: 'opaque-undo' } }];
+  };
   const json = (res, value, status = 200) => { res.writeHead(status, { 'content-type': 'application/json;charset=utf-8' }); res.end(JSON.stringify(value)); };
   const server = http.createServer(async (req, res) => {
     try {
@@ -37,18 +42,27 @@ test('global and editor assistants run, show sources, stop, resume, retry and pr
         requests.push(body); const id = 'run-' + (++counter); const job = { id, runId: id, projectId: body.projectId || null, status: 'running', instruction: body.instruction, mode: body.mode, steps: [{ id: 'step1', type: 'tool', tool: 'web_search', status: 'running', label: '搜索网页' }], message: '', sources: [], effects: [] };
         runs.set(id, { job, count: 0, slow: /慢|后台|恢复/.test(body.instruction), fail: failNext }); failNext = false; json(res, { runId: id, job }, 202); return;
       }
+      const resume = /^\/api\/assistant\/runs\/([^/]+)\/resume$/.exec(url.pathname);
+      if (resume && req.method === 'POST') {
+        const run = runs.get(resume[1]); if (!run?.job.resumable) { json(res, { error: '任务缺少可恢复状态' }, 409); return; }
+        assert.ok(!['instruction', 'projectId', 'mode'].some(key => Object.hasOwn(body, key)), 'Resume cannot replace the goal, project or original mode');
+        resumeRequests.push({ runId: run.job.id, body: structuredClone(body), originalMode: run.job.mode, originalInstruction: run.job.instruction });
+        run.fail = false; run.count = 0; run.job.status = 'running'; run.job.resumable = false; run.job.resumeCount = (run.job.resumeCount || 0) + 1; delete run.job.error; delete run.job.resumeBlockReason; run.job.steps[0].status = 'running';
+        json(res, { runId: run.job.id, job: run.job }, 202); return;
+      }
       const match = /^\/api\/assistant\/runs\/([^/]+)(\/cancel)?$/.exec(url.pathname);
       if (match) {
         const run = runs.get(match[1]); if (!run) { json(res, { error: '未找到助手任务' }, 404); return; }
         if (match[2]) { run.job.status = 'cancelled'; run.job.steps[0].status = 'cancelled'; json(res, { job: run.job }); return; }
+        readRequests.push(run.job.id);
         if (run.job.status === 'running') {
           run.count++;
           if (run.count >= (run.slow ? 4 : 2)) {
-            run.job.status = run.fail ? 'failed' : 'completed'; run.job.steps[0].status = run.fail ? 'failed' : 'completed'; run.job.steps.push({ id: 'step2', type: 'tool', tool: 'web_read', status: 'completed', label: '读取网页', message: '<img src=x onerror=window.bad=true>' });
+            writeOnce(run);
+            run.job.status = run.fail ? 'failed' : 'completed'; run.job.resumable = run.fail; run.job.steps[0].status = run.fail ? 'failed' : 'completed'; if (!run.job.steps.some(step => step.id === 'step2')) run.job.steps.push({ id: 'step2', type: 'tool', tool: 'web_read', status: 'completed', label: '读取网页', message: '<img src=x onerror=window.bad=true>' });
             run.job.message = run.fail ? '' : '已检索并阅读资料，主要结论来自真实工具响应 [S1]。<script>window.bad=true</script>';
             if (run.fail) run.job.error = { code: 'MODEL_ERROR', message: '隔离模型暂时失败' };
             else { run.job.sources = [{ id: 'S1', title: '来源 <b>原文</b>', url: 'https://example.com/reference' }];
-              if (run.job.projectId && run.job.mode === 'auto' && /修改/.test(run.job.instruction)) { const project = projects.get(run.job.projectId); project.outputs = { article: { title: '服务器新文案', body: '保留服务器修改' } }; run.job.effects = [{ type: 'project', projectId: project.id, changed: true, label: '已更新文案', undo: { kind: 'project', id: 'opaque-undo' } }]; }
             }
           }
         }
@@ -81,7 +95,16 @@ window.mountEditor=async()=>{appAssistant.dispose();fixture.innerHTML='';window.
   await page.locator('#modal-root [data-close]').click();await page.evaluate(()=>{window.defaultProject='video-a';tasks.open({scope:'all'})});await page.locator('[data-task-id="task-external-run"] [data-task-action="assistant"]').waitFor();assert.equal(await page.locator('[data-task-id="invalid-source-task"] [data-task-action="assistant"]').count(),0);const postedBeforeTask=requests.length;await page.locator('[data-task-id="task-external-run"] [data-task-action="assistant"]').click();await page.waitForFunction(()=>!document.querySelector('[data-app-assistant-input]').disabled);assert.equal(await page.locator('[data-app-assistant-project]').inputValue(),'');assert.match(await page.locator('[data-app-assistant-messages]').innerText(),/从任务中心恢复的外部问答/);assert.match(await page.locator('[data-assistant-run="external-run"]').innerText(),/外部任务已完成/);assert.equal(requests.length,postedBeforeTask,'Opening an assistant task only reads its run');await page.evaluate(()=>window.defaultProject=null);
   await page.locator('[data-app-assistant-project]').selectOption('writing-a'); await page.locator('[data-app-assistant-mode]').selectOption('ask'); await page.locator('[data-app-assistant-input]').fill('只解释材料'); await page.locator('[data-app-assistant-send]').click(); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled); assert.equal(requests.at(-1).mode, 'ask'); assert.equal(requests.at(-1).projectId, 'writing-a');
   await page.locator('[data-app-assistant-input]').fill('慢任务'); await page.locator('[data-app-assistant-send]').click(); await page.locator('[data-app-assistant-stop]').click(); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled); assert.equal([...runs.values()].at(-1).job.status, 'cancelled');
-  await page.request.post(url + '/fixture/fail-next'); await page.locator('[data-app-assistant-input]').fill('重新核对资料'); await page.locator('[data-app-assistant-send]').click(); await page.locator('[data-app-assistant-retry]').last().waitFor(); assert.match(await page.locator('[data-app-assistant-messages]').innerText(), /隔离模型暂时失败/); const previousCount = requests.length; await page.locator('[data-app-assistant-retry]').last().click(); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled); assert.equal(requests.length, previousCount + 1);
+  await page.locator('[data-app-assistant-mode]').selectOption('auto'); await page.request.post(url + '/fixture/fail-next'); await page.locator('[data-app-assistant-input]').fill('修改文案后重新核对资料'); await page.locator('[data-app-assistant-send]').click(); await page.locator('[data-app-assistant-retry]').last().waitFor(); assert.match(await page.locator('[data-app-assistant-messages]').innerText(), /隔离模型暂时失败/);
+  const failedRun = [...runs.values()].at(-1).job, previousCount = requests.length, previousResumeCount = resumeRequests.length, previousWrites = effectWrites;
+  assert.equal(previousWrites, 1); assert.equal(projects.get('writing-a').outputs.article.body, '保留服务器修改');
+  await page.locator('[data-app-assistant-mode]').selectOption('ask'); await page.locator('[data-app-assistant-retry]').last().click(); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled);
+  assert.equal(requests.length, previousCount, 'Continue must not start another run'); assert.equal(resumeRequests.length, previousResumeCount + 1); assert.equal(resumeRequests.at(-1).runId, failedRun.id); assert.equal(resumeRequests.at(-1).originalMode, 'auto'); assert.equal(failedRun.mode, 'auto'); assert.equal(failedRun.status, 'completed'); assert.equal(failedRun.resumeCount, 1); assert.equal(effectWrites, previousWrites, 'A successful earlier write is not replayed');
+  assert.equal(failedRun.steps.filter(step => step.id === 'step2').length, 1);
+  await page.evaluate(() => appAssistant.open({ projectId: 'writing-a', runId: 'legacy-failed' })); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled);
+  const legacy = page.locator('[data-assistant-run="legacy-failed"]'); assert.match(await legacy.innerText(), /旧任务没有可核对的恢复状态/); const previousReads = readRequests.filter(id => id === 'legacy-failed').length;
+  await legacy.locator('[data-app-assistant-retry]').click(); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled);
+  assert.equal(readRequests.filter(id => id === 'legacy-failed').length, previousReads + 1); assert.equal(requests.length, previousCount); assert.equal(resumeRequests.length, previousResumeCount + 1); assert.equal(runs.get('legacy-failed').job.status, 'failed');
   await page.locator('[data-app-assistant-input]').fill('后台任务'); await page.locator('[data-app-assistant-send]').click(); await page.locator('#modal-root [data-close]').click(); await new Promise(resolve => setTimeout(resolve, 4500)); await page.evaluate(() => appAssistant.open({projectId:'writing-a'})); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled); assert.match(await page.locator('[data-app-assistant-messages]').innerText(), /主要结论/);
   await page.locator('[data-app-assistant-input]').fill('恢复任务'); await page.locator('[data-app-assistant-send]').click(); await page.waitForFunction(() => JSON.parse(localStorage.getItem('gx-assistant-conversations-v1')).some(session => session.messages.some(message => message.status === 'working' && message.runId))); await page.reload(); await page.waitForFunction(() => window.ready); await page.evaluate(() => appAssistant.open({projectId:'writing-a'})); await page.waitForFunction(() => !document.querySelector('[data-app-assistant-input]').disabled); assert.equal([...runs.values()].at(-1).job.status, 'completed');
   await page.locator('#modal-root [data-close]').click();await page.evaluate(()=>tasks.open({scope:'all'}));await page.locator('[data-task-id="task-run-2"] [data-task-action="assistant"]').click();await page.waitForFunction(()=>!document.querySelector('[data-app-assistant-input]').disabled);assert.equal(await page.locator('[data-app-assistant-project]').inputValue(),'writing-a');const targetBox=await page.locator('[data-assistant-run="run-2"]').boundingBox(),logBox=await page.locator('[data-app-assistant-messages]').boundingBox();assert.ok(targetBox.y+targetBox.height>logBox.y&&targetBox.y<logBox.y+logBox.height,'Task entry locates the requested historical run: '+JSON.stringify({targetBox,logBox}));

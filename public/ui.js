@@ -62,11 +62,11 @@ export async function api(path,body,options={}) {
  catch(error) {
   if(error?.name==='AbortError')throw error;
   const invalid=new Error(`本地工作服务返回了无法读取的响应（HTTP ${response.status}）。请重新打开应用后重试。`);
-  invalid.code='LOCAL_SERVICE_INVALID_RESPONSE';throw invalid;
+  invalid.code='LOCAL_SERVICE_INVALID_RESPONSE';invalid.status=response.status;throw invalid;
  }
  if(!response.ok) {
   const error=new Error(typeof data?.error==='string'?data.error:data?.error?.message||data?.message||`请求失败（${response.status}）`);
-  error.code=data?.code||'REQUEST_FAILED';throw error;
+  error.code=data?.code||'REQUEST_FAILED';error.status=response.status;throw error;
  }
  return data;
 }
