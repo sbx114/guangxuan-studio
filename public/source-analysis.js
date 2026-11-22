@@ -78,10 +78,26 @@ export function createSourceAnalysis({ getSettings = () => ({}), onChanged } = {
     }
     paint(session);
   }
-  function resultMarkup(session, item, index) {
+  function basicResultMarkup(session, item, index) {
     const states = { complete: '已完成', partial: '部分完成', error: '未完成', unavailable: '未配置', skipped: '未启用', 'not-applicable': '不适用' };
     const transcript = item.transcript || {};
     return `<article class="sa-result"><header><div><h3>${h(item.name)}</h3><span>${h(item.range?.timecode)}${item.cached ? ' · 已有分析' : ''}</span></div><div class="sa-result-actions"><button class="btn small" type="button" data-sa-copy="${index}">复制时间码摘要</button><button class="btn small" type="button" data-sa-download="${index}">保存结果</button></div></header><p class="sa-summary">${h(item.summary?.text)}</p><p class="sa-evidence-note">${h(item.summary?.coverageNote || item.coverage?.note || '')}</p>${item.warnings?.length ? `<ul class="sa-warnings">${[...new Set(item.warnings)].map(warning => `<li>${h(warning)}</li>`).join('')}</ul>` : ''}<div class="sa-frames">${(item.keyframes || []).map(frame => `<figure><img src="${h(safeFrameUrl(session.id, item, frame))}" alt="${h(item.name)} ${h(frame.timecode)}的抽样画面" loading="lazy"><figcaption>${h(frame.timecode)} · ${h(frame.shotId)}</figcaption></figure>`).join('')}</div><details><summary>镜头与采样区间 · ${(item.shots || []).length} 段</summary>${item.shots?.length ? `<div class="sa-shot-list">${item.shots.map(shot => `<div><code>${h(shot.timecode)}</code><span class="sa-boundary">${h(({ range: '区间起点', detected: '画面变化估计', interval: '间隔采样' })[shot.boundary] || '采样')}</span><p>${h(shot.description || '尚无画面内容描述。')}</p></div>`).join('')}</div>` : '<p>此素材没有视频镜头。</p>'}</details><details ${transcript.text ? 'open' : ''}><summary>语音转写 · ${h(states[transcript.status] || '未启用')}</summary>${transcript.timingNote ? `<p class="sa-evidence-note">${h(transcript.timingNote)}</p>` : ''}${transcript.segments?.length ? `<div class="sa-transcript">${transcript.segments.slice(0, 300).map(segment => `<p><code>${h(segment.timecode)}${segment.timing === 'chunk' ? ' · 分块范围' : ''}</code><span>${h(segment.text)}</span></p>`).join('')}${transcript.segments.length > 300 ? '<p>窗口先显示前300段，保存结果可查看全部转写。</p>' : ''}</div>` : `<p>${h(transcript.warning || '暂无转写内容。')}</p>`}</details></article>`;
+  }
+  function resultMarkup(session, item, index) {
+    const page = item.pagination;
+    const next = page?.hasMore === true && Number.isSafeInteger(page.nextShotOffset) ? `<button class="btn small" type="button" data-sa-next="${index}">继续分析后续镜头</button>` : '';
+    const sampledShots = new Set((item.frames || item.keyframes || []).map(frame => frame.shotId).filter(Boolean));
+    const returnedShots = Number.isSafeInteger(page?.returnedShots) ? page.returnedShots : sampledShots.size;
+    const paging = page ? `<p class="sa-evidence-note">本页 ${returnedShots} / ${Number(page.totalShots) || 0} 段镜头或采样区间 ${next}</p>` : '';
+    const purposes = { establish: '建立场景', subject: '展示主体', action: '推进动作', detail: '细节', context: '补充背景', transition: '衔接', hold: '停留' };
+    const cueRows = (item.shots || []).flatMap(shot => {
+      const cue = shot.cues; if (cue?.kind !== 'visual-sampled') return [];
+      const subjects = (cue.subjects || []).map(subject => `${subject.label}${subject.role === 'primary' ? '（主体）' : ''}`).join('、');
+      const motion = cue.motion?.status === 'paired-observation' ? cue.motion.description || '已记录前后画面对照' : '本段运动缺少可确认的前后对照';
+      const uses = (cue.usableSegments || []).map(segment => `<li>${h(timecode(segment.start))} — ${h(timecode(segment.end))} · ${h(purposes[segment.purpose] || '候选用途')}：${h(segment.rationale)}</li>`).join('');
+      return [`<section><h4>${h(shot.timecode || shot.id)}</h4><p>${h(subjects)}${subjects ? ' · ' : ''}${h(cue.composition?.focus || '')}</p><p>${h(motion)}</p>${uses ? `<ul>${uses}</ul>` : ''}<p class="sa-evidence-note">候选片段依据所列采样帧，使用前可继续核对完整动作与衔接。</p></section>`];
+    }).join('');
+    return `${paging}${basicResultMarkup(session, item, index)}${cueRows ? `<details class="sa-result"><summary>画面线索与候选片段用途</summary>${cueRows}</details>` : ''}`;
   }
   function paint(session) {
     const panel = panelFor(session); if (!panel) return;
@@ -101,6 +117,7 @@ export function createSourceAnalysis({ getSettings = () => ({}), onChanged } = {
       session.resultStamp = stamp;
       panel.querySelector('[data-sa-results]').innerHTML = session.items.length ? session.items.map((item, index) => resultMarkup(session, item, index)).join('') : '<p class="sa-empty">暂无分析结果。</p>';
     }
+    panel.querySelectorAll('[data-sa-next]').forEach(button => { button.disabled = running || !session.runtimeAvailable; });
   }
   const hPhase = value => ({ queued: '排队中', preparing: '准备素材', scenes: '本地镜头分析', keyframes: '抽取关键帧', transcribing: '语音转写', summarizing: 'AI内容摘要', saving: '保存结果', complete: '已完成', cancelled: '已取消', error: '未完成' })[value] || '等待中';
   function mergeResults(session, items) {
@@ -136,19 +153,21 @@ export function createSourceAnalysis({ getSettings = () => ({}), onChanged } = {
     };
     void next();
   }
-  async function start(session, refresh = false) {
+  async function start(session, refresh = false, page = {}) {
     if (busy(session)) return;
     session.error = '';
-    const sources = [...session.selected].map(assetId => {
+    const sources = page.sources || [...session.selected].map(assetId => {
       const range = session.ranges.get(assetId) || {};
       if (!finite(range.start) || !finite(range.end) || Number(range.end) <= Number(range.start)) throw new Error('请填写有效的分析起止秒数。');
       return { assetId, start: Number(range.start), end: Number(range.end) };
     });
     if (!sources.length || sources.length > 8) throw new Error('每次请选择1至8个项目素材。');
+    if (sources.some(source => !session.assets.some(asset => asset.id === source.assetId) || !Number.isFinite(source.start) || !Number.isFinite(source.end) || source.end <= source.start)) throw new Error('镜头页所引用的素材或区间已变化，请刷新素材。');
+    const options = { ...session.options, ...(page.options || {}) };
     session.starting = true; paint(session);
     session.startPromise = (async () => {
       const settings = await getSettings();
-      const job = await api(endpoint(session.id), { sources, options: { ...session.options }, refresh, ...(session.options.transcribe || session.options.visualSummary ? { settings } : {}) });
+      const job = await api(endpoint(session.id), { sources, options, refresh, ...(options.transcribe || options.visualSummary ? { settings } : {}) });
       session.job = job; session.failures = 0; poll(session); return job;
     })().catch(error => { session.error = error.message; throw error; }).finally(() => { session.starting = false; paint(session); });
     return session.startPromise;
@@ -183,6 +202,11 @@ export function createSourceAnalysis({ getSettings = () => ({}), onChanged } = {
           if (input.dataset.saOption && input.type !== 'checkbox') session.options[input.dataset.saOption] = input.value;
         });
         panel.addEventListener('click', event => {
+          const next = event.target.closest('[data-sa-next]');
+          if (next) {
+            const item = session.items[Number(next.dataset.saNext)], page = item?.pagination;
+            if (page?.hasMore && Number.isSafeInteger(page.nextShotOffset)) void start(session, false, { sources: [{ assetId: item.assetId, start: item.range.start, end: item.range.end }], options: { shotOffset: page.nextShotOffset, shotLimit: Math.min(6, page.shotLimit || 6), maxFrames: 12 } }).catch(error => { session.error = error.message; paint(session); });
+          }
           const copy = event.target.closest('[data-sa-copy]'), save = event.target.closest('[data-sa-download]');
           if (copy) { const item = session.items[Number(copy.dataset.saCopy)]; if (item) { if (!navigator.clipboard?.writeText) toast('无法复制，可保存结果后查看。', 'error'); else void navigator.clipboard.writeText(plainResult(item)).then(() => toast('时间码摘要已复制'), () => toast('无法复制，可保存结果后查看。', 'error')); } }
           if (save) {

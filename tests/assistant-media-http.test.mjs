@@ -163,17 +163,21 @@ test('real assistant HTTP downloads an image, sends actual visual blocks and imp
   await evidence('http-science-image-ocr', { passed: true, originalSha256: sha(f.bytes), documentId: added.id, sourceUrl: imageUrl, actualImageBlocks: f.calls.visions[0].images, selectedPagesUnchanged: true, personaSceneUnchanged: true, rawTextSha256: sha(rawText) });
 });
 
-test('real assistant HTTP samples three video frames, extracts real WAV for local ASR and imports bounded sourced knowledge', { skip: !bin, timeout: 60000 }, async t => {
+test('real assistant HTTP samples a complete twelve-frame source page, extracts real WAV and imports bounded sourced knowledge', { skip: !bin, timeout: 60000 }, async t => {
   const f = await fixture(t, { videoSeconds: 3.2 }), original = await scienceProject(f, 'science-video-http');
   f.setPlan(sciencePlan(videoUrl, 'video'));
   const job = await f.run({ projectId: original.id, instruction: `请处理 ${videoUrl} 视频的画面和音频，整理知识后导入当前科普资料库` });
   assert.equal(job.status, 'completed', JSON.stringify({ job, fixtureErrors: f.calls.errors })); assert.deepEqual(f.calls.errors, []);
   const docs = (await f.json(`/api/projects/${original.id}/science-documents`)).documents, added = docs.find(doc => doc.id !== original.science.documentSelection.documentId); assert.equal(docs.length, 2); assert.ok(added);
   const { document } = await f.json(`/api/projects/${original.id}/science-documents/${added.id}`), text = document.units.map(unit => unit.text).join('\n');
-  assert.ok(text.includes(asrText) && text.includes(videoUrl)); assert.match(text, /实际音频转写（AI ASR，非人工校对）/); assert.match(text, /视频抽样范围：00:00.000—00:03.200/); assert.match(text, /共3帧，未逐帧/);
+  assert.ok(text.includes(asrText) && text.includes(videoUrl)); assert.match(text, /实际音频转写（AI ASR，非人工校对）/); assert.match(text, /视频抽样范围：00:00.000—00:03.200/); assert.match(text, /共12帧，未逐帧/);
   assert.equal(f.calls.asr.length, 1); assert.ok(f.calls.asr[0].bytes > 1000); assert.equal(f.calls.visions.length, 1);
-  const visual = f.calls.visions[0]; assert.equal(visual.images.length, 3); assert.equal(visual.payload.transcriptStatus, 'complete'); assert.equal(visual.payload.transcript.text, asrText); assert.equal(visual.payload.coverage.frameByFrame, false); assert.equal(visual.payload.coverage.frameCount, 3);
-  assert.ok(visual.payload.frames.every(frame => frame.timestamp >= 0 && frame.timestamp <= 3.2));
+  const visual = f.calls.visions[0]; assert.equal(visual.images.length, 12); assert.equal(visual.payload.transcriptStatus, 'complete'); assert.equal(visual.payload.transcript.text, asrText); assert.equal(visual.payload.coverage.frameByFrame, false); assert.equal(visual.payload.coverage.frameCount, 12);
+  const actualTimes = visual.payload.frames.map(frame => frame.timestamp);
+  assert.deepEqual(actualTimes, Array.from({ length: 12 }, (_, index) => Math.round(3.2 * (index + 1) / 13 * 1000) / 1000));
+  assert.deepEqual(visual.payload.coverage.timestamps, actualTimes);
+  assert.deepEqual(visual.payload.coverage.framePagination, { offset: 0, returned: 12, plannedFrames: 12, plannedPageHonored: true, hasMore: false, nextOffset: null });
+  assert.equal(visual.payload.coverage.nextRangeStart, null); assert.equal(visual.payload.coverage.truncated, false);
   assert.deepEqual((await f.json('/api/projects/' + original.id)).project.science, original.science);
   assert.deepEqual(await readdir(path.join(f.dataDir, 'source-analysis', '.work')), []);
   const rawText = await readFile(path.join(f.dataDir, 'science-documents', original.id, added.id, 'source.txt'), 'utf8'); assert.ok(rawText.includes(asrText));

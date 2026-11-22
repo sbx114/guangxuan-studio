@@ -5,7 +5,7 @@ import { createRemotionIntegration } from '../lib/remotion-integration.mjs';
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 function fixture(overrides = {}) {
   const project = { id: 'owner-a', kind: 'video', createdAt: 'owner-version', video: {} };
-  const record = { id: 'source', ownerCreatedAt: project.createdAt, revision: 1, title: '自由作品', compositionId: 'Main', inputProps: {}, files: [{ path: 'index.tsx', content: 'source' }] };
+  const record = { id: 'source', ownerCreatedAt: project.createdAt, revision: 1, title: '自由作品', entryPoint: 'index.tsx', compositionId: 'Main', inputProps: {}, files: [{ path: 'index.tsx', content: 'source' }] };
   const calls = [];
   const projects = {
     read: async () => structuredClone(record),

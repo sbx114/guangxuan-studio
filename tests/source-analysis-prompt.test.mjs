@@ -40,7 +40,7 @@ test('coarse cut and assistant prompts preserve bounded selected source evidence
     assert.equal(item.shots[1].description, '');
     assert.equal(item.transcript.status, 'partial');
     assert.equal(item.transcript.timing, 'chunk');
-    assert.deepEqual(item.transcript.segments[0], { start: 10, end: 30, text: '以下是分块内识别到的讲解文字。', timing: 'chunk' });
+    assert.deepEqual(item.transcript.segments[0], { start: 10, end: 30, text: '以下是分块内识别到的讲解文字。', timing: 'chunk', timeBasis: 'source-absolute' });
     assert.deepEqual(item.omitted, { transcriptSegments: 3, shots: 4, textTruncated: false });
     assert.equal(item.provenance.imported, true);
     assert.equal(item.provenance.verifiedContentSha256, 'a'.repeat(64));
@@ -106,7 +106,7 @@ test('shots and speech retain only valid absolute times inside their analyzed so
   assert.equal(item.shots.length, 1);
   assert.deepEqual(item.shots[0].evidence, ['f000.jpg']);
   assert.equal(item.transcript.timing, 'segment');
-  assert.deepEqual(item.transcript.segments, [{ start: 12.5, end: 14.75, text: '有效识别句段', timing: 'segment' }]);
+  assert.deepEqual(item.transcript.segments, [{ start: 12.5, end: 14.75, text: '有效识别句段', timing: 'segment', timeBasis: 'source-absolute' }]);
   assert.equal(item.omitted.shots, 6);
   assert.equal(item.omitted.transcriptSegments, 6);
   for (const value of ['OUTSIDE_SHOT', 'STRING_TIME', 'OUTSIDE_SPEECH', 'ZERO_DURATION', 'NAN_TIME', '../secret']) assert.ok(!built.user.includes(value));

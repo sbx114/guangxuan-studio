@@ -145,8 +145,8 @@ test('media_analyze can read the whole current library independently of the edit
   const ctx = f.context();
   const result = await f.call('media_analyze', { assetIds: ['allowed'] }, ctx);
   assert.deepEqual(calls[0].input.sources, [{ assetId: 'allowed', start: 0, end: 10 }]);
-  assert.equal(calls[0].input.options.maxFrames, 3); assert.equal(calls[0].options.signal, ctx.signal);
-  assert.match(result.summary, /真实抽样/);
+  assert.equal(calls[0].input.options.maxFrames, 12); assert.equal(calls[0].options.signal, ctx.signal);
+  assert.match(result.summary, /真实.*画面/);
   assert.equal(calls[0].input.options.transcribe, false); assert.equal(result.data.items[0].transcript.status, 'unavailable');
   await f.call('media_analyze', { assetIds: ['unselected'], range: { start: 1, end: 3 } }, ctx);
   assert.deepEqual(calls[1].input.sources, [{ assetId: 'unselected', start: 1, end: 3 }]);
@@ -236,6 +236,43 @@ test('review forwards targeted composition-time comparisons to the current owned
   assert.equal(result.data.frames.at(-1).frame, 899);
   assert.deepEqual(await fx.store.read(fx.project.id), before);
   assert.deepEqual(result.effects || [], []);
+});
+
+test('material analysis advances actual asset and source windows and forwards a bounded shot page', async t => {
+  const calls = [], assets = Array.from({ length: 10 }, (_, index) => ({ id: index === 0 ? 'allowed' : `asset-${index}`, name: `素材${index}`, type: 'video', duration: 1000 }));
+  const fx = await fixture(t, { kind: 'video', services: {
+    openFilm: { context: async () => ({ ...nativeContext(), assets, timeline: [] }) },
+    sourceAnalysis: { analyze: async (_project, input) => { calls.push(input); return { items: input.sources.map(source => ({ assetId: source.assetId, range: source, summary: { kind: 'technical' }, pagination: { shotOffset: 6, nextShotOffset: 12 } })) }; } },
+  } });
+  const ctx = fx.context({ mode: 'ask' }), before = await fx.store.read(fx.project.id);
+  const result = await fx.call('media_analyze', { assetOffset: 8, range: { start: 300, end: 900 }, shotOffset: 6, shotLimit: 6 }, ctx);
+  assert.deepEqual(calls[0].sources, [{ assetId: 'asset-8', start: 300, end: 600 }, { assetId: 'asset-9', start: 300, end: 600 }]);
+  assert.equal(calls[0].options.maxFrames, 12);
+  assert.equal(calls[0].options.shotOffset, 6);
+  assert.equal(calls[0].options.shotLimit, 6);
+  assert.equal(result.data.assetPagination.total, 10);
+  assert.equal(result.data.assetPagination.nextAssetOffset, null);
+  assert.deepEqual(result.data.sourceWindows[0].nextRange, { start: 600, end: 900 });
+  assert.equal(result.data.items[0].pagination.nextShotOffset, 12);
+  await fx.call('media_analyze', { assetIds: ['allowed'], maxFrames: 1, shotLimit: 6 }, ctx);
+  assert.equal(calls[1].options.shotLimit, 1, 'requested shot page fits the actual image budget');
+  assert.deepEqual(await fx.store.read(fx.project.id), before);
+  await assert.rejects(fx.call('media_analyze', { assetOffset: 0, assetIds: ['asset-0'] }, ctx), { code: 'ASSISTANT_MEDIA_PAGE' });
+});
+
+test('science media import forwards the requested video window and frame page to owned knowledge preparation', async t => {
+  const calls = [], fx = await fixture(t, { kind: 'science', services: {
+    downloads: { mediaAsset: async () => ({ asset: { id: 'owned-video', type: 'video' }, download: { name: '课程片段', url: 'https://example.com/lesson.mp4' } }) },
+    mediaUnderstanding: { prepare: async (...args) => { calls.push(args); return { document: { id: 'knowledge-doc', title: '片段资料', sourceHash: 'a'.repeat(64) }, analysis: { coverage: { complete: false } }, duplicate: false }; } },
+  } });
+  const result = await fx.call('media_prepare_import', { downloadId: 'a'.repeat(36), range: { start: 300, end: 600 }, frameOffset: 6, framePageSize: 6 }, fx.context());
+  assert.equal(calls[0][0], fx.project.id); assert.equal(calls[0][1], 'owned-video');
+  assert.deepEqual(calls[0][2].range, { start: 300, end: 600 });
+  assert.equal(calls[0][2].frameOffset, 6); assert.equal(calls[0][2].framePageSize, 6);
+  assert.equal(result.data.documentId, 'knowledge-doc');
+  assert.equal(result.data.assetId, 'owned-video');
+  assert.equal(result.data.downloadId, 'a'.repeat(36), 'the next frame/range page can identify the original download');
+  assert.equal(result.data.analysis.coverage.complete, false);
 });
 
 test('knowledge_generate uses current selected units, live shared profiles and density and stores no profile copies', async t => {

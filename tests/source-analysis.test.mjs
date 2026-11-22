@@ -62,7 +62,10 @@ test('source analysis: actual FFmpeg evidence, bounded provider protocol, cache 
         const text = content[0].text, evidence = JSON.parse(text.slice(text.indexOf('\n') + 1));
         const pictures = content.filter(part => ['input_image', 'image_url'].includes(part.type));
         visionRequests.push({ model: value.model, responses, pictures: pictures.length, evidence, jpeg: pictures.every(part => Buffer.from((part.image_url?.url || part.image_url).split(',')[1], 'base64').subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))) });
-        const answer = JSON.stringify({ summary: '基于提供的抽样关键帧与协议夹具转写生成的摘要。', shots: [...evidence.shots.map(shot => ({ id: shot.id, description: `样本画面 ${shot.id}`, tags: ['测试帧'] })), { id: 's999', description: '不应接受的虚构镜头' }] });
+        const answer = JSON.stringify({ summary: '基于提供的抽样关键帧与协议夹具转写生成的摘要。', shots: [...evidence.shots.map(shot => {
+          const frames = evidence.sampledFrames.filter(frame => frame.shotId === shot.id);
+          return { id: shot.id, description: `样本画面 ${shot.id}`, tags: ['测试帧'], ...(value.model === 'fixture-cues' ? { cues: { evidence: frames.map(frame => frame.id), subjects: [{ label: '当前色块', role: 'primary', position: 'center' }], composition: { shotSize: 'wide', negativeSpace: 'none', focus: '实际色块' }, motion: { beforeFrame: frames[0]?.id, afterFrame: frames[1]?.id, direction: 'static', camera: 'static', description: '此对实际帧显示静态色块' }, usableSegments: [{ purpose: 'hold', start: shot.start, end: shot.end, evidence: frames.map(frame => frame.id), rationale: '所列静态抽样候选' }] } } : {}) };
+        }), { id: 's999', description: '不应接受的虚构镜头' }] });
         return json(200, responses ? { output_text: answer } : { choices: [{ message: { content: answer } }] });
       }
       json(404, {});
@@ -106,6 +109,28 @@ test('source analysis: actual FFmpeg evidence, bounded provider protocol, cache 
       const tooLong = add(video, 'video', 3600, 160, 90, true);
       await assert.rejects(service.start(projectId, { sources: [{ assetId: tooLong.id }] }, { origin }), error => error.code === 'SOURCE_ANALYSIS_INVALID_RANGE');
       membership.set(projectId, membership.get(projectId).filter(asset => asset.id !== tooLong.id));
+    });
+    await t.test('actual cut pages carry paired JPEG evidence, cue provenance and later source windows without semantic guesses', async () => {
+      const input = { sources: [{ assetId: visual.id }], options: { visualSummary: true, model: 'fixture-cues', maxFrames: 12, shotLimit: 1, sceneThreshold: .15 } };
+      const first = (await service.analyze(projectId, input, { origin, settings })).items[0];
+      assert.equal(first.keyframes.length, 2); assert.deepEqual(first.keyframes.map(frame => frame.phase), ['before', 'after']);
+      assert.ok(first.keyframes.every(frame => /^[a-f0-9]{64}$/.test(frame.sha256))); assert.equal(first.pagination.nextShotOffset, 1);
+      assert.ok(first.shots[0].cues.evidence.every(id => first.keyframes.some(frame => frame.id === id)));
+      assert.equal(first.shots[0].cues.motion.status, 'paired-observation'); assert.equal(first.shots[0].cues.motion.continuous, false);
+      assert.equal(first.shots[0].cues.subjects[0].role, 'primary'); assert.ok(first.shots.slice(1).every(shot => !shot.cues));
+      const second = (await service.analyze(projectId, { ...input, options: { ...input.options, shotOffset: 1 } }, { origin, settings })).items[0];
+      assert.ok(second.keyframes.every(frame => frame.timestamp > 1.5 && frame.timestamp < 3));
+      assert.ok(second.keyframes.every(frame => !first.keyframes.some(old => old.id === frame.id))); assert.equal(second.pagination.nextShotOffset, 2);
+      const context = (await service.context(projectId, { origin, assetIds: [visual.id] })).sourceAnalysis;
+      assert.ok(context.items.some(item => item.pagination?.shotOffset === 1 && item.frames.length === 2 && item.shots.some(shot => shot.cues)));
+      assert.ok(visionRequests.at(-1).jpeg && visionRequests.at(-1).pictures === 2);
+    });
+    await t.test('later shot pages reuse only exact-content successful ASR with the same speech profile', async () => {
+      const input = { sources: [{ assetId: visual.id }], options: { transcribe: true, transcriptionModel: 'fixture-cue-asr-reuse', audioChunkSeconds: 1, maxFrames: 12, shotLimit: 1, sceneThreshold: .15 } };
+      const first = (await service.analyze(projectId, input, { origin, settings })).items[0], count = speechRequests.length;
+      const second = (await service.analyze(projectId, { ...input, options: { ...input.options, shotOffset: 1 } }, { origin, settings })).items[0];
+      assert.equal(speechRequests.length, count); assert.equal(second.transcript.cacheReused, true); assert.equal(second.transcript.originalAnalyzedAt, first.analyzedAt);
+      assert.equal(second.transcript.segments[0].timeBasis, 'source-absolute'); assert.deepEqual(second.transcript.segments[0].sourceChunk, { start: 0, end: 1 });
     });
     await t.test('real multipart ASR protocol and visual requests retain absolute source timecodes', async () => {
       const result = await service.analyze(projectId, { sources: [{ assetId: visual.id, start: .5, end: 3 }], options: { transcribe: true, transcriptionModel: 'fixture-speech', language: 'zh', audioChunkSeconds: 1, visualSummary: true, maxFrames: 2, sceneThreshold: .15 } }, { origin, settings });
