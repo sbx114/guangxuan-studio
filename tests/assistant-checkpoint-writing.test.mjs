@@ -70,6 +70,23 @@ test('model-authored operation instructions cannot supply new factual dates or o
   assert.throws(() => normalizeModelData('writing-draft', { channel: 'article', output: article('活动于2032年3月4日举行。'), evidence: [], notes: [] }, payload), { code: 'WRITING_UNSUPPORTED_FACT' });
 });
 
+test('writing revision uses the actual current draft when an older channel output differs', async t => {
+  const output = article('当前新稿内容。'), oldOutput = article('旧输出副本。'), calls = [];
+  const fx = await fixture(t, { outputs: { article: oldOutput }, writing: { draft: { channel: 'article', output } } }, {
+    ai: async (task, input) => {
+      calls.push(input);
+      return { data: normalizeModelData(task, { channel: 'article', replacement: '精修当前稿。', evidence: [], notes: [], summary: '精修' }, buildPrompt(task, input).payload) };
+    },
+  });
+  const ctx = { ...fx.ctx, instruction: '只改选中的当前新稿段落。', writingContext: {
+    channel: 'article', writingRevision: fx.saved.writingRevision || 0, outputFingerprint: assistantWritingFingerprint(output),
+    selection: { path: ['body'], start: 0, end: output.body.length, text: output.body },
+  } };
+  await fx.call(fx.adapter(), 'writing_revise', {}, ctx);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0].output)), output, 'the reviser receives the same draft that the window verified');
+  assert.equal((await fx.store.read(fx.saved.id)).writing.draft.output.body, '精修当前稿。');
+});
+
 test('writing operations retain the last explicit requirement of a long assistant dialogue', async t => {
   const ending = '最后要求：保留2034年4月5日这个用户给出的日期。', instruction = '按当前要求整理文字。'.repeat(700) + ending;
   let received;
