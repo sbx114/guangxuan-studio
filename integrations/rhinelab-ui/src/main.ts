@@ -406,6 +406,7 @@ let scene: ArchiveScene | undefined;
 let threeState: "on" | "closing" | "off" | "loading" = "on";
 let startupPreparationState: "loading" | "ready" | "fallback" = "loading";
 let startupPreparationReason = "";
+let startupAsyncShadersAvailable: boolean | null = null;
 let resumeCell: { lane: number; row: number } | undefined;
 let resumeSelection = -1;
 let viewer: ModelViewer | undefined;
@@ -1750,6 +1751,7 @@ async function start() {
       const { ArchiveScene } = await import("./scene");
       if (abandoned) return;
       preparingScene = new ArchiveScene($("#three-scene"));
+      startupAsyncShadersAvailable = preparingScene.asyncShadersAvailable;
       preparingScene.setTheme(prefs.colorTheme === "dark", true);
       preparingScene.setSuperPerformance(superPerformanceEnabled());
       preparingScene.setQuality(effectiveRenderQuality());
@@ -1817,7 +1819,9 @@ async function start() {
   } catch (error) {
     abandoned = true;
     startupPreparationState = "fallback";
-    startupPreparationReason = error instanceof Error && error.message === "HOME_PREPARATION_TIMEOUT" ? "timeout" : "unavailable";
+    startupPreparationReason = error instanceof Error && error.message === "HOME_PREPARATION_TIMEOUT" ? "timeout"
+      : error instanceof Error && error.message === "HOME_GPU_ASYNC_UNAVAILABLE" ? "async-gpu-unavailable" : "unavailable";
+    if (startupPreparationReason === "async-gpu-unavailable") startupAsyncShadersAvailable = false;
     // Dispose now and again when pending asynchronous resources settle.
     // They may finish loading after the deadline, but never become active.
     try { preparingScene?.dispose(); } catch { /* The renderer may already be lost. */ }
@@ -1830,7 +1834,9 @@ async function start() {
     const notice = document.createElement("div");
     notice.className = "home-startup-notice";
     notice.setAttribute("role", "status");
-    notice.innerHTML = '<span>首页画面未能准备完成，已切换为二维项目界面。</span><button type="button">重新载入首页</button>';
+    notice.innerHTML = startupPreparationReason === "async-gpu-unavailable"
+      ? '<span>当前图形驱动不支持异步着色器编译，已切换为二维项目界面。</span><button type="button">重新载入首页</button>'
+      : '<span>首页画面未能准备完成，已切换为二维项目界面。</span><button type="button">重新载入首页</button>';
     notice.querySelector("button")!.addEventListener("click", () => location.reload());
     $("#viewport").append(notice);
   } finally {
@@ -2104,7 +2110,7 @@ Object.assign(window, {
       mode,
       ready,
       startup: started ? "started" : (entry?.phase ?? "loading"),
-      startupPreparation: { state: startupPreparationState, reason: startupPreparationReason },
+      startupPreparation: { state: startupPreparationState, reason: startupPreparationReason, asyncShadersAvailable: startupAsyncShadersAvailable },
       motion: { reduced: motionIsReduced(), preset: prefs.motionPreset },
       bootTime:
         mode === "boot"

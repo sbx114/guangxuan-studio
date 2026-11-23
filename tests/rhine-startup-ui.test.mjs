@@ -25,12 +25,26 @@ async function fixture(t, kind) {
     const original = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function(type, ...args) { if (/^webgl/.test(type)) return null; return original.call(this, type, ...args); };
   });
+  if (kind === 'async-gpu-unavailable') await page.addInitScript(() => {
+    window.__homeGpuProbe = { extensionChecks: 0, forbiddenCalls: [] };
+    for (const prototype of [WebGLRenderingContext.prototype, WebGL2RenderingContext.prototype]) {
+      const getExtension = prototype.getExtension;
+      prototype.getExtension = function(name) {
+        if (name === 'KHR_parallel_shader_compile') { window.__homeGpuProbe.extensionChecks++; return null; }
+        return getExtension.call(this, name);
+      };
+      for (const method of ['compileShader', 'linkProgram', 'drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'finish', 'flush', 'fenceSync', 'clientWaitSync']) {
+        if (typeof prototype[method] !== 'function') continue;
+        prototype[method] = function() { window.__homeGpuProbe.forbiddenCalls.push(method); throw new Error('Unsupported homepage must not call GPU ' + method); };
+      }
+    }
+  });
   const current = { title: '独立启动回归当前稿', body: '三维首页不可用时，文案工作区仍读取这份实际保存的当前稿。' };
   const response = await fetch(app.url + '/api/projects/startup-writing', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'writing', title: '独立启动回归', source: { text: '独立本地材料。' }, writing: { brief: { channel: 'article' }, draft: { channel: 'article', output: current, evidence: [], notes: [] } }, outputs: { article: current } }) });
   assert.equal(response.status, 200); const before = (await response.json()).project;
   async function state() {
     const frame = page.frames().find(frame => frame.url().includes('/rhine/index.html'));
-    return frame.evaluate(() => ({ startup: window.rhine?.stats().startup, preparation: window.rhine?.stats().startupPreparation, threeState: window.rhine?.stats().threeState, ready: window.rhine?.stats().ready, mode: window.rhine?.stats().mode, loadingPresent: Boolean(document.querySelector('#loading')), canvasCount: document.querySelectorAll('#three-scene canvas').length, stageInert: document.querySelector('#stage').inert, marks: performance.getEntriesByType('mark').filter(item => item.name.startsWith('gx:')).map(item => item.name) }));
+    return frame.evaluate(() => ({ startup: window.rhine?.stats().startup, preparation: window.rhine?.stats().startupPreparation, threeState: window.rhine?.stats().threeState, ready: window.rhine?.stats().ready, mode: window.rhine?.stats().mode, loadingPresent: Boolean(document.querySelector('#loading')), canvasCount: document.querySelectorAll('#three-scene canvas').length, stageInert: document.querySelector('#stage').inert, gpuProbe: window.__homeGpuProbe, marks: performance.getEntriesByType('mark').filter(item => item.name.startsWith('gx:')).map(item => item.name) }));
   }
   async function ready() {
     await page.frameLocator('.rhine-home-frame').locator('#stage').waitFor({ state: 'attached', timeout: 10000 });
@@ -69,11 +83,20 @@ test('actual WebGL failure exposes a 2D fallback notice and keeps project naviga
   assert.ok(f.visualWarnings.length); await f.openCurrentWriting(); await f.evidence(state);
 });
 
-test('a stalled homepage model has a bounded 2D fallback and its late response cannot reactivate the discarded scene', { timeout: 60000 }, async t => {
-  const f = await fixture(t, 'model-timeout'); let release; const gate = new Promise(resolve => { release = resolve; }); let intercepted = 0;
-  await f.page.route('**/*.glb', async route => { intercepted++; await gate; await route.continue().catch(() => {}); });
+test('missing async shader capability never compiles or draws the homepage and real project navigation remains available', { timeout: 60000 }, async t => {
+  const f = await fixture(t, 'async-gpu-unavailable'); let modelRequests = 0; f.page.on('request', request => { if (/\.glb(?:\?|$)/.test(request.url())) modelRequests++; });
+  await f.page.goto(f.app.url, { waitUntil: 'domcontentloaded' }); const state = await f.ready();
+  assert.equal(state.preparation.state, 'fallback'); assert.equal(state.preparation.reason, 'async-gpu-unavailable', JSON.stringify({ state, warnings: f.visualWarnings })); assert.equal(state.preparation.asyncShadersAvailable, false); assert.equal(state.threeState, 'off'); assert.equal(state.canvasCount, 0);
+  assert.ok(state.gpuProbe.extensionChecks > 0, 'Actual WebGL extension lookup must have been observed'); assert.deepEqual(state.gpuProbe.forbiddenCalls, []); assert.equal(modelRequests, 0, 'Capability refusal must happen before model loading'); assert.ok(!state.marks.includes('gx:scene:prepare-start'));
+  const notice = f.page.frameLocator('.rhine-home-frame').locator('.home-startup-notice'); assert.match(await notice.innerText(), /图形驱动不支持异步着色器编译/);
+  await f.openCurrentWriting(); const final = await f.state(); assert.deepEqual(final.gpuProbe.forbiddenCalls, []); await f.evidence(final);
+});
+
+test('a stalled optional scene module has a bounded 2D fallback and its late response cannot activate a scene', { timeout: 60000 }, async t => {
+  const f = await fixture(t, 'scene-module-timeout'); let release; const gate = new Promise(resolve => { release = resolve; }); let intercepted = 0;
+  await f.page.route(/\/rhine\/assets\/scene-[^/]+\.js(?:\?|$)/, async route => { intercepted++; await gate; await route.continue().catch(() => {}); });
   t.after(() => release());
-  await f.page.goto(f.app.url, { waitUntil: 'domcontentloaded' }); const state = await f.ready(); assert.ok(intercepted > 0, 'The actual model request must have been intercepted');
+  await f.page.goto(f.app.url, { waitUntil: 'domcontentloaded' }); const state = await f.ready(); assert.ok(intercepted > 0, 'The actual optional scene module request must have been intercepted');
   assert.equal(state.preparation.state, 'fallback'); assert.equal(state.preparation.reason, 'timeout'); assert.equal(state.threeState, 'off'); assert.equal(state.canvasCount, 0);
   release(); await f.page.waitForTimeout(1500); const late = await f.state(); assert.equal(late.preparation.state, 'fallback'); assert.equal(late.threeState, 'off'); assert.equal(late.canvasCount, 0); assert.equal(late.loadingPresent, false);
   await f.openCurrentWriting(); await f.evidence(late);

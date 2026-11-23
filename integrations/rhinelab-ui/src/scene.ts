@@ -201,6 +201,7 @@ export class ArchiveScene {
     });
   }
   readonly renderer: THREE.WebGLRenderer;
+  readonly asyncShadersAvailable: boolean;
   readonly scene = new THREE.Scene();
   // The reference uses a long lens 72–140 units from the cassette. A 0.1 near
   // plane quantizes adjacent optical layers to the same depth (visible shimmer).
@@ -338,6 +339,15 @@ export class ArchiveScene {
       alpha: false,
       powerPreference: "high-performance",
     });
+    // Lighting/environment setup below can already compile and draw. Without
+    // KHR support, Three's compileAsync is synchronous and may block timers.
+    // Refuse the optional scene before any of those renderer operations.
+    this.asyncShadersAvailable = this.renderer.extensions.has("KHR_parallel_shader_compile");
+    if (!this.asyncShadersAvailable) {
+      this.renderer.dispose();
+      this.renderer.forceContextLoss();
+      throw new Error("HOME_GPU_ASYNC_UNAVAILABLE");
+    }
     this.renderer.setPixelRatio(
       Math.min(devicePixelRatio, this.quality.pixelRatio) *
         Math.min(innerWidth / 1920, innerHeight / 1080),

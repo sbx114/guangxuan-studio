@@ -30,7 +30,9 @@ async function lockFile(filename, duration) {
   const timer = setTimeout(() => child.kill(), 5000);
   try { await Promise.race([acquired, exited.then(() => { throw Error('Lock helper exited without acquiring a lock'); })]); } finally { clearTimeout(timer); }
   const release = async () => { if (!signaled) { signaled = true; events.push({ event: 'release-request', elapsedMs: Date.now() - started }); if (!duration) await writeFile(releaseFile, 'release', { flag: 'wx' }); } await exited; await disposed; await unlink(releaseFile).catch(error => { if (error.code !== 'ENOENT') throw error; }); };
-  release.events = events; return release;
+  release.events = events;
+  Object.defineProperty(release, 'disposed', { value: disposed, writable: false });
+  return release;
 }
 
 test('atomic rename retries only temporary sharing errors with nine attempts and 1180ms bounded backoff', async () => {
@@ -61,14 +63,16 @@ test('real Windows read sharing lock releases during atomic project save without
   // A timed lock really remains held beyond the old540ms budget. RELEASED is
   // emitted only after FileStream.Dispose; it is not a parent stdin timestamp.
   let stopped = false, reads = 0, readError;
-  // Thousands of immediate Windows reopen operations can starve rename even
-  // after the sharing lock is released. Yield while retaining concurrent reads.
+  // Cloud evidence showed continuous reopens can still deny rename after the
+  // PowerShell lock was disposed. Exercise reads while that real lock is held,
+  // then quiesce them on its actual ACK instead of racing forever until save.
   const reader = (async () => { while (!stopped) { try { const project = JSON.parse(await readFile(filename, 'utf8')); assert.ok(['old', 'new'].includes(project.title)); reads++; await pause(5); } catch (error) { readError = error; break; } } })();
-  const start = Date.now();
-  try { const pending = store.save('locked', { kind: 'science', title: 'new', science: {} }); await pause(250); assert.equal((await store.read('locked')).title, 'old', 'no unlink or partial overwrite while locked'); await pending; } finally { stopped = true; await reader; await release(); }
-  assert.ok(Date.now() - start < 2000); assert.ifError(readError); assert.ok(reads > 0); assert.ok(release.events.some(event => event.event === 'RELEASED'));
+  const start = Date.now(); let readerClosedAt, readsAtDispose;
+  const quiesced = release.disposed.then(async () => { readsAtDispose = reads; stopped = true; await reader; readerClosedAt = Date.now() - start; });
+  try { const pending = store.save('locked', { kind: 'science', title: 'new', science: {} }); await pause(250); assert.equal((await store.read('locked')).title, 'old', 'no unlink or partial overwrite while locked'); await quiesced; await pending; } finally { stopped = true; await reader; await release(); }
+  assert.ok(Date.now() - start < 2000); assert.ifError(readError); assert.ok(readsAtDispose >= 2, 'multiple real concurrent reads must occur before Dispose ACK'); assert.ok(release.events.some(event => event.event === 'RELEASED'));
   assert.equal((await store.read('locked')).title, 'new'); assert.deepEqual((await readdir(path.dirname(filename))).filter(name => name.endsWith('.tmp')), []);
-  Object.assign(evidence, { passed: true, test: 'real700ms-sharing-lock', elapsedMs: Date.now() - start, reads, events: release.events, oldReadableDuringRetry: true, replacementComplete: true, temporaryFilesRemoved: true });
+  Object.assign(evidence, { passed: true, test: 'real700ms-sharing-lock-reader-quiesces-on-dispose-ack', elapsedMs: Date.now() - start, reads, readsAtDispose, readerClosedAt, readerStopReason: 'actual PowerShell FileStream.Dispose ACK', events: release.events, oldReadableDuringRetry: true, replacementComplete: true, temporaryFilesRemoved: true });
 });
 
 test('exhausted real Windows lock preserves original bytes and errno; store settles and remains usable', { skip: !windows, timeout: 15000 }, async t => {
