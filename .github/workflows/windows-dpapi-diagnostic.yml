@@ -1,0 +1,28 @@
+name: Windows DPAPI runtime diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Trace synthetic DPAPI probe stages
+        shell: pwsh
+        run: |
+          $gxOutput = Join-Path $env:RUNNER_TEMP 'gx-dpapi-diagnostic'
+          $gxPowerShell = (Get-Command pwsh).Source
+          & node .github/scripts/ci-dpapi-diagnostic.mjs --source $env:GITHUB_WORKSPACE --output $gxOutput --pwsh $gxPowerShell
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-DPAPI-synthetic-diagnostic
+          path: ${{ runner.temp }}/gx-dpapi-diagnostic
+          if-no-files-found: error
