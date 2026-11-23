@@ -16,7 +16,7 @@ jobs:
         shell: pwsh
         run: |
           $gxOutput = Join-Path $env:RUNNER_TEMP 'gx-file-lock-diagnostic'
-          & node .github/scripts/diagnose-cloud-lock.mjs --source $env:GITHUB_WORKSPACE --output $gxOutput
+          & node .github/scripts/diagnose-cloud-lock.mjs "--source=$env:GITHUB_WORKSPACE" "--output=$gxOutput"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload lock diagnostic evidence
         if: always()
