@@ -25,9 +25,9 @@ Gx 将材料整理、内容写作、动画创作和多轨剪辑放在同一套�
 
 ## 下载安装
 
-当前版本为 **0.2.0 / Windows x64**（2026-11-22 执行闭环修复）。在 [GitHub Releases](https://github.com/sbx114/guangxuan-studio/releases) 获取安装器、便携包、完整源码包和 SHA256 校验文件。
+当前版本为 **0.2.1 / Windows x64**（2026-11-23 实际流程复查修复）。在 [GitHub Releases](https://github.com/sbx114/guangxuan-studio/releases) 获取安装器、便携包、完整源码包和 SHA256 校验文件。
 
-1. **安装版**：运行 `Gx-0.2.0-Windows-x64-Setup.exe`，选择安装目录。安装面向当前 Windows 账户；从开始菜单的 **Gx** 或安装目录的 **Gx.exe** 打开。
+1. **安装版**：运行 `Gx-0.2.1-Windows-x64-Setup.exe`，选择安装目录。安装面向当前 Windows 账户；从开始菜单的 **Gx** 或安装目录的 **Gx.exe** 打开。
 2. **便携版**：完整解压 Windows x64 程序包，双击 **Gx.exe**。请保留整个目录，运行文件与依赖需一起使用。
 3. **连接模型**：在 **模型连接** 填写服务地址、模型名称和 API 密钥。需要跨次恢复时勾选 **在本机加密保存密钥**，保存后测试连接。
 
@@ -36,7 +36,7 @@ Gx 将材料整理、内容写作、动画创作和多轨剪辑放在同一套�
 发行安装器尚未进行代码签名，可使用发布页的 SHA256 校验下载文件：
 
 ```powershell
-Get-FileHash .\Gx-0.2.0-Windows-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\Gx-0.2.1-Windows-x64-Setup.exe -Algorithm SHA256
 ```
 
 ## 创作与数据

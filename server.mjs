@@ -38,8 +38,10 @@ import { createAssistantArtifactService } from './lib/assistant-artifacts.mjs';
 import { createConnectionStore } from './lib/connection-store.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const APP_VERSION = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')).version;
 const PUBLIC_ROOT = path.join(ROOT, 'public');
 const MAX_BODY = 30 * 1024 * 1024;
+const currentWritingOutput = (project, channel) => project.writing?.draft?.channel === channel ? project.writing.draft.output : project.outputs?.[channel];
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.wasm': 'application/wasm', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8' };
 
 function securityHeaders(res, embeddedHome = false) {
@@ -397,7 +399,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
       if (pathname === '/api/openfilm/context' && method === 'GET') return json(res, 200, await openFilm.context(requestUrl.searchParams.get('projectId'), req.headers.origin || requestUrl.origin));
       if (pathname === '/api/openfilm/exports' && method === 'GET') return json(res, 200, await openFilm.nativeExports(validateProjectId(requestUrl.searchParams.get('projectId'))));
       const nativeDownload = pathname.match(/^\/api\/openfilm\/exports\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)\/file$/);
-      if (nativeDownload && ['GET', 'HEAD'].includes(method)) return openFilm.download(req, res, nativeDownload[1], nativeDownload[2]);
+      if (nativeDownload && ['GET', 'HEAD'].includes(method)) return await openFilm.download(req, res, nativeDownload[1], nativeDownload[2]);
       if (method === 'POST' && ['/api/openfilm/open', '/api/openfilm/context', '/api/openfilm/apply-plan', '/api/openfilm/append-asset', '/api/openfilm/import-asset', '/api/openfilm/assistant-undo', '/api/openfilm/export'].includes(pathname)) {
         const body = await readJson(req);
         const origin = req.headers.origin || requestUrl.origin;
@@ -445,7 +447,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
         if (referenceId && method === 'DELETE') return json(res, 200, await references.remove(projectId, referenceId));
         throw new AppError(405, '参考内容不支持此操作。', 'METHOD_NOT_ALLOWED');
       }
-      if (pathname === '/api/health' && method === 'GET') return json(res, 200, { ok: true, name: 'Guangxuan Studio', version: '0.2.0', mode: 'local' });
+      if (pathname === '/api/health' && method === 'GET') return json(res, 200, { ok: true, name: 'Guangxuan Studio', version: APP_VERSION, mode: 'local' });
       if (pathname === '/api/prompts' && method === 'GET') return json(res, 200, getPromptCatalog());
       if (pathname === '/api/projects' && method === 'GET') return json(res, 200, await store.list());
       if (pathname === '/api/projects/summary' && method === 'GET') {
@@ -510,8 +512,9 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
             payload.writingReferences = await writingReferences.context(project, referenceConfig);
             if (body.task === 'writing-revise' && payload.channel) payload.writingBrief = { ...payload.writingBrief, channel: payload.channel };
             const channel = normalizeWritingInput(body.task, payload).channel;
-            if (body.task === 'writing-revise' && assistantContentHash({ output: payload.output }) !== assistantContentHash({ output: project.outputs?.[channel] })) throw new AppError(409, '当前稿件已有更新，你的改写要求已保留，请基于最新稿件再试。', 'WRITING_INPUT_CHANGED');
-            writingBase = { id: project.id, createdAt: project.createdAt, source: assistantContentHash({ source: project.source, facts: project.facts }), output: body.task === 'writing-revise' ? assistantContentHash({ output: project.outputs?.[channel] }) : null, channel, referenceConfig: assistantContentHash({ references: referenceConfig }), referenceHash: payload.writingReferences.fingerprint };
+            const output = currentWritingOutput(project, channel);
+            if (body.task === 'writing-revise' && assistantContentHash({ output: payload.output }) !== assistantContentHash({ output })) throw new AppError(409, '当前稿件已有更新，你的改写要求已保留，请基于最新稿件再试。', 'WRITING_INPUT_CHANGED');
+            writingBase = { id: project.id, createdAt: project.createdAt, writingRevision: project.writingRevision || 0, source: assistantContentHash({ source: project.source, facts: project.facts }), output: body.task === 'writing-revise' ? assistantContentHash({ output }) : null, channel, referenceConfig: assistantContentHash({ references: referenceConfig }), referenceHash: payload.writingReferences.fingerprint };
           }
           if (body.task === 'visual-novel') {
             if (!projectId || (await store.read(projectId))?.kind !== 'science') throw new AppError(400, '请先打开一个科普项目。', 'SCIENCE_PROJECT_REQUIRED');
@@ -537,7 +540,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
             let referencesChanged = false;
             try { referencesChanged = assistantContentHash({ references: normalizeWritingReferenceConfig(latest.writing?.references) }) !== writingBase.referenceConfig || (await writingReferences.context(latest)).fingerprint !== writingBase.referenceHash; }
             catch (error) { if (String(error.code || '').startsWith('WRITING_REFERENCE_')) referencesChanged = true; else throw error; }
-            if (referencesChanged || assistantContentHash({ source: latest.source, facts: latest.facts }) !== writingBase.source || (writingBase.output !== null && assistantContentHash({ output: latest.outputs?.[writingBase.channel] }) !== writingBase.output)) result.meta = { ...result.meta, inputChanged: true, inputChangeNote: '材料、稿件或参考已更新，新稿保留为候选。' };
+            if (referencesChanged || (latest.writingRevision || 0) !== writingBase.writingRevision || assistantContentHash({ source: latest.source, facts: latest.facts }) !== writingBase.source || (writingBase.output !== null && assistantContentHash({ output: currentWritingOutput(latest, writingBase.channel) }) !== writingBase.output)) result.meta = { ...result.meta, inputChanged: true, inputChangeNote: '材料、稿件或参考已更新，新稿保留为候选。' };
             }
             return result;
           }, { signal: controller.signal, safeRetry: false });

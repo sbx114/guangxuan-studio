@@ -84,6 +84,7 @@ if (Test-Path -LiteralPath $appExecutable) {
   Remove-Item -LiteralPath $runtimeExecutable -Force
 } else { Rename-Item -LiteralPath $runtimeExecutable -NewName 'Gx.exe' }
 & (Join-Path $PSScriptRoot 'set-windows-icon.ps1') -ExecutablePath $appExecutable -IconPath (Join-Path $repoRoot 'desktop/icon.ico')
+& (Join-Path $PSScriptRoot 'set-windows-version.ps1') -ExecutablePath $appExecutable -Version $package.version
 $appDestination = Join-Path $buildOutput 'resources/app'
 New-Item -ItemType Directory -Path $appDestination -Force | Out-Null
 foreach ($required in @('package.json','server.mjs','LICENSE','lib','public','desktop','animation','scripts')) {

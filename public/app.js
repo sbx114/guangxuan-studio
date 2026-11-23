@@ -67,7 +67,7 @@ function renderShell(){
  if(state.view==='video'){void workspace.openLast('video');return;}
  if(state.view==='writer'&&!writer()){workspace.showHome();workspace.newProjectDialog('writing');return;}
  if(state.view==='science'&&!science()){workspace.showHome();workspace.newProjectDialog('science');return;}
- app.innerHTML=`${workspaceHeader(state.view)}<main class="app-main" id="page"></main><footer class="app-footer"><span id="save-status">${['writer','science'].includes(state.view)?'自动保存':''}</span><span>v0.2.0</span></footer>`;
+ app.innerHTML=`${workspaceHeader(state.view)}<main class="app-main" id="page"></main><footer class="app-footer"><span id="save-status">${['writer','science'].includes(state.view)?'自动保存':''}</span><span>v0.2.1</span></footer>`;
  app.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>navigate(b.dataset.nav));
  installWorkspaceTools(app);
  const page=app.querySelector('#page');
@@ -87,10 +87,11 @@ function openProject(id){workspace.showHome(id);}
 
 function renderWriter(page){return writingDesk.render(page,writer());}
 
-function outputText(p,channel){const o=p.outputs?.[channel];if(!o)return'';if(channel==='article')return `${o.title}\n\n${o.lead||''}\n\n${o.body||''}`;if(channel==='social')return `${o.title}\n\n${o.text}\n\n${(o.tags||[]).map(t=>'#'+t.replace(/^#/,'')).join(' ')}`;if(channel==='poster')return `${o.title}\n${o.subtitle}\n\n${(o.highlights||[]).join('\n')}\n\n${(o.details||[]).map(d=>`${d.label}：${d.value}`).join('\n')}\n\n${o.footer||''}`;return `${o.title}\n总时长：${o.durationSeconds}秒\n\n${(o.shots||[]).map((s,i)=>`镜头${i+1}（${s.duration}秒）\n画面：${s.visual}\n旁白：${s.narration}\n字幕：${s.caption}`).join('\n\n')}`;}
+function exportOutput(p,channel){const draft=p.writing?.draft;return draft?.channel===channel&&draft.output&&typeof draft.output==='object'&&!Array.isArray(draft.output)?draft.output:p.outputs?.[channel];}
+function outputText(p,channel){const o=exportOutput(p,channel);if(!o)return'';if(channel==='article')return `${o.title}\n\n${o.lead||''}\n\n${o.body||''}`;if(channel==='social')return `${o.title}\n\n${o.text}\n\n${(o.tags||[]).map(t=>'#'+t.replace(/^#/,'')).join(' ')}`;if(channel==='poster')return `${o.title}\n${o.subtitle}\n\n${(o.highlights||[]).join('\n')}\n\n${(o.details||[]).map(d=>`${d.label}：${d.value}`).join('\n')}\n\n${o.footer||''}`;return `${o.title}\n总时长：${o.durationSeconds}秒\n\n${(o.shots||[]).map((s,i)=>`镜头${i+1}（${s.duration}秒）\n画面：${s.visual}\n旁白：${s.narration}\n字幕：${s.caption}`).join('\n\n')}`;}
 function processReport(p){return `# ${p.title} · 制作记录\n\n导出时间：${new Date().toLocaleString('zh-CN')}\n内容状态：${p.generationMode==='live'?'包含实时AI生成内容':p.isDemo?'预置演示内容':'人工准备'}\n来源：${p.source?.url||'用户输入'}\n\n## 事实与原文依据\n\n${(p.facts||[]).map(f=>`- ${f.label}：${f.value}\n  确认状态：${f.confirmed?'用户已确认':'待确认'}\n  引句：${f.quote}`).join('\n\n')}\n\n## AI调用\n\n${(p.runs||[]).map(r=>`### ${taskNames[r.task]||r.task}\n\n时间：${r.at}\n模型：${r.meta?.model||'未记录'}\n提示词版本：${r.meta?.promptVersion||'未记录'}\n等待时长：${((r.meta?.durationMs||0)/1000).toFixed(1)}秒\n\n系统提示词：\n${r.prompt?.system||''}\n\n用户提示词：\n${r.prompt?.user||''}`).join('\n\n')}\n\n## 修改记录\n\n${(p.history||[]).map(x=>`- ${x.at} ${x.label}`).join('\n')}\n`;}
 function exportMenu(p,{channel=state.channel,text}={}){
- const content=typeof text==='string'?text:outputText(p,channel),name=safeName(p.outputs?.[channel]?.title||p.title||'我的文稿');
+ const output=exportOutput(p,channel),content=typeof text==='string'?text:outputText(p,channel),title=output?.title||p.title||'我的文稿',name=safeName(title);
  if(!content.trim()){toast('先完成一份稿件再导出');return;}
  showModal({title:'导出当前稿件',body:`<p class="small muted">只导出当前这份${h(channelLabels[channel]||'文稿')}。</p><div class="stack"><button class="btn" data-export="docx">${icon('file')}Word 文档</button><button class="btn" data-export="txt">${icon('text')}纯文本 TXT</button><button class="btn" data-export="md">${icon('download')}Markdown</button>${channel==='poster'?`<button class="btn" data-export="poster">${icon('layers')}海报图片 PNG</button>`:''}${channel==='video'?`<button class="btn" data-export="video">${icon('video')}将这份分镜送入剪辑</button>`:''}</div>`,onMount:(root,close)=>root.querySelectorAll('[data-export]').forEach(b=>b.onclick=async()=>{
   const label=b.innerHTML;b.disabled=true;
@@ -100,7 +101,7 @@ function exportMenu(p,{channel=state.channel,text}={}){
    else if(type==='poster')await exportPoster(p);
    else if(type==='docx'){
     b.textContent='正在生成文档…';
-    const response=await fetchLocal('/api/export/docx',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:p.outputs?.[channel]?.title||p.title,sections:[{heading:channelLabels[channel]||'文稿',content}]})});
+    const response=await fetchLocal('/api/export/docx',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,sections:[{heading:channelLabels[channel]||'文稿',content}]})});
     if(!response.ok)throw new Error((await response.json()).error||'文档导出未完成，请重试');
     await saveFile(`${name}.docx`,await response.blob());
    }else await saveFile(`${name}.${type}`,content,type==='txt'?'text/plain;charset=utf-8':'text/markdown;charset=utf-8');
@@ -108,7 +109,7 @@ function exportMenu(p,{channel=state.channel,text}={}){
   }catch(error){toast(error.message,'error');b.disabled=false;b.innerHTML=label;}
  })});
 }
-async function exportPoster(p){return exportPosterImage(p.outputs?.poster,{document,saveFile,safeName});}
+async function exportPoster(p){return exportPosterImage(exportOutput(p,'poster'),{document,saveFile,safeName});}
 async function sendToVideo(p){try{await workspace.sendScriptToVideo(p);}catch(error){toast(error.message,'error');}}
 function renderArchiveBase(page){
  const items=state.summaries.slice().sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));

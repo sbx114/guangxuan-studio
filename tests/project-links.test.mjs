@@ -12,8 +12,9 @@ import { buildPrompt } from '../lib/prompts.mjs';
 
 const shot = { narration: '旧旁白', caption: '旧字幕', visual: '旧镜头', duration: 6 };
 async function setup(t, { native = true } = {}) {
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'gx-project-links-'));
-  t.after(async () => { assert.ok(path.resolve(dataDir).startsWith(path.resolve(os.tmpdir(), 'gx-project-links-'))); await rm(dataDir, { recursive: true, force: true }); });
+  const base = path.resolve(process.env.GUANGXUAN_TEST_DIR || os.tmpdir()); await mkdir(base, { recursive: true });
+  const dataDir = await mkdtemp(path.join(base, 'gx-project-links-'));
+  t.after(async () => { assert.equal(path.dirname(dataDir), base); await rm(dataDir, { recursive: true, force: true }); });
   const store = await createProjectStore(dataDir);
   await store.save('source-doc', { kind: 'writing', title: '来源', source: { text: '已确认原文' }, outputs: { video: { shots: [shot] } } });
   await store.save('target-video', { kind: 'video', title: '剪辑', video: { script: shot.narration, openfilmDraftCaptions: [{ start: 0, end: 6, text: shot.caption }] } });
@@ -26,6 +27,43 @@ async function setup(t, { native = true } = {}) {
   return { dataDir, store, service, updateSource, film };
 }
 const request = (state, selectedIds, extra = {}) => ({ sourceHash: state.sourceHash, targetHash: state.targetHash, revision: state.revision, selectedIds, ...extra });
+
+test('source snapshots use the current video draft and track its updates without rewriting older channel outputs', async t => {
+  const { service, store, film } = await setup(t);
+  const source = await store.read('source-doc');
+  source.outputs.article = { title: '独立文章', body: '文章渠道正文' };
+  source.writing = { draft: { channel: 'video', output: { title: '当前分镜', shots: [{ narration: '当前旁白', caption: '当前字幕', visual: '当前画面', duration: 3 }] } } };
+  await store.save(source.id, source);
+  const before = await store.read(source.id), current = await service.preview(source.id);
+  assert.equal(current.storyboard[0].narration, '当前旁白'); assert.equal(current.storyboard[0].duration, 3); assert.equal(current.body, '文章渠道正文');
+  await service.bind('target-video', { sourceProjectId: source.id });
+  const updated = await store.read(source.id); updated.writing.draft.output.shots[0].narration = '新当前旁白'; await store.save(updated.id, updated);
+  const changed = await service.status('target-video'); assert.ok(changed.changes.some(change => change.id === '0:narration' && change.after === '新当前旁白'));
+  assert.deepEqual((await store.read(source.id)).outputs, before.outputs); assert.equal(await readFile(film, 'utf8'), 'manual timeline stays byte-for-byte unchanged');
+});
+
+test('article snapshots follow the current article body while retaining the video channel and read-only source contents', async t => {
+  const { service, store } = await setup(t);
+  const source = await store.read('source-doc'); source.outputs.article = { title: '旧文章', body: '旧文章正文' };
+  source.writing = { draft: { channel: 'article', output: { title: '当前文章', body: '当前文章正文' } } }; await store.save(source.id, source);
+  const before = await store.read(source.id), current = await service.preview(source.id);
+  assert.equal(current.body, '当前文章正文'); assert.equal(current.storyboard[0].narration, shot.narration); assert.deepEqual(await store.read(source.id), before);
+  await service.bind('target-video', { sourceProjectId: source.id });
+  const updated = await store.read(source.id); updated.writing.draft.output.body = '文章最新正文'; await store.save(updated.id, updated);
+  const changed = await service.status('target-video'); assert.ok(changed.changes.some(change => change.id === 'source:body' && change.after === '文章最新正文'));
+  assert.equal((await store.read(source.id)).outputs.article.body, '旧文章正文');
+});
+
+test('other-channel and invalid drafts keep their own outputs, while an empty current video does not revive an older storyboard', async t => {
+  const { service, store } = await setup(t);
+  const source = await store.read('source-doc'); source.outputs.article = { title: '独立文章', body: '文章渠道正文' };
+  source.writing = { draft: { channel: 'social', output: { title: '社群稿', text: '当前社群正文' } } }; await store.save(source.id, source);
+  let current = await service.preview(source.id); assert.equal(current.body, '文章渠道正文'); assert.equal(current.storyboard[0].narration, shot.narration);
+  source.writing.draft = { channel: 'video', output: [] }; await store.save(source.id, source);
+  current = await service.preview(source.id); assert.equal(current.storyboard[0].narration, shot.narration);
+  source.writing.draft = { channel: 'video', output: { title: '当前空分镜', shots: [] } }; await store.save(source.id, source);
+  current = await service.preview(source.id); assert.deepEqual(current.storyboard, []); assert.equal(current.body, '文章渠道正文');
+});
 async function importActualScript(t, store, project, script) {
   const code = (await readFile(new URL('../public/openfilm-actions.js', import.meta.url), 'utf8')).replace(/^import .*;\s*$/gm, '').replace('export function createOpenfilmActions', 'function createOpenfilmActions');
   const context = { escapeHtml: String, clone: structuredClone, uid: () => 'script-import-history', toast() {}, window: { addEventListener() {}, removeEventListener() {} } };

@@ -141,14 +141,17 @@ test('long writing reads provide complete continuation positions without splitti
 
 test('downloaded media imports retain their source page, reuse a receipt, and detect a manual native change', async t => {
   let imports = 0, revision = 'native-1';
-  const asset = { id: 'saved-audio', type: 'audio', name: '音频原件.wav', duration: 3, provenance: { sourcePage: { title: '素材原页', url: 'https://materials.example.org/audio' } } };
+  const asset = { id: 'prepared-audio-source', type: 'audio', name: '音频原件.wav', duration: 3, provenance: { sourcePage: { title: '素材原页', url: 'https://materials.example.org/audio' } } };
+  const ownedAsset = { ...asset, id: 'registered-audio-copy' };
   const fx = await fixture(t, { kind: 'video', video: { timeline: [] } }, {
     downloads: { mediaAsset: async () => ({ asset, download: { name: asset.name, url: 'https://files.example.org/audio.wav', provenance: asset.provenance } }) },
-    openFilm: { context: async () => ({ assets: imports ? [asset] : [], timeline: [], duration: 0, revision }), importAsset: async () => { imports++; revision = 'native-2'; return { asset, revision }; } },
+    openFilm: { context: async () => ({ assets: imports ? [ownedAsset] : [], timeline: [], duration: 0, revision }), importAsset: async (projectId, sourceId, _origin, options) => { assert.equal(sourceId, asset.id); assert.equal(options.expectedRevision, 'native-1'); imports++; revision = 'native-2'; return { projectId, imported: true, asset: ownedAsset, revision }; } },
   });
   const app = fx.adapter(), args = { downloadId: 'd'.repeat(36) };
   const imported = await fx.call(app, 'download_media_import', args);
   assert.equal(imported.data.asset.type, 'audio'); assert.equal(imported.data.timelineChanged, false);
+  assert.equal(imported.data.asset.id, ownedAsset.id); assert.equal(imported.data.sourceAssetId, asset.id);
+  assert.equal(imported.effects[0].importedAssetId, ownedAsset.id);
   assert.equal(imported.sources[0].url, 'https://materials.example.org/audio');
   await fx.call(app, 'download_media_import', args); assert.equal(imports, 1);
   revision = 'manual-native-change';

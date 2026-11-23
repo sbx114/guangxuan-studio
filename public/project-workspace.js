@@ -11,6 +11,11 @@ import { createSourceVersions } from './source-versions.js';
 import { createExportPreflightUI } from './export-preflight.js';
 import { createAppAssistant } from './app-assistant.js';
 
+function writingOutput(project, channel) {
+  const draft = project.writing?.draft;
+  return draft?.channel === channel && draft.output && typeof draft.output === 'object' && !Array.isArray(draft.output) ? draft.output : project.outputs?.[channel];
+}
+
 export function createProjectWorkspace({ app, state, saveProject, callAi, requireConnection, onWriting, onScience, beforeLeave, onLeave, onOtherView, onAssistantChanged }) {
   const home = document.createElement('div'), video = document.createElement('div'), status = document.createElement('div');
   home.id = 'gx-home-portal'; video.id = 'gx-video-portal'; status.className = 'gx-transition-status'; status.hidden = true;
@@ -313,23 +318,24 @@ export function createProjectWorkspace({ app, state, saveProject, callAi, requir
     } });
   }
   async function sendScriptToVideo(project) {
+    const script = writingOutput(project, 'video');
     if (project.kind !== 'video') {
-      if (!project.outputs?.video?.shots?.length) return toast('请先生成视频分镜');
+      if (!script?.shots?.length) return toast('请先生成视频分镜');
       const videoProject = await scienceVideo(project);
       const sourceStatus = await sourceVersions.status(videoProject.id);
       if (['changed', 'untracked'].includes(sourceStatus.status)) {
         await showHome(videoProject.id); await sourceVersions.open(videoProject); return;
       }
-      if (project.outputs?.video?.shots?.length) await actions.importScript(videoProject, project.outputs.video, project.title);
+      if (script?.shots?.length) await actions.importScript(videoProject, script, project.title);
       await refreshSummaries(); await showHome(videoProject.id);
       toast('分镜已送入关联视频项目'); return;
     }
-    if (!project.outputs?.video) return toast('请先生成视频分镜');
+    if (!script) return toast('请先生成视频分镜');
     project.kind = 'video';
     project.video ||= { timeline: [], captions: [], aspect: '16:9', resolution: '720', sourceVolume: 1, music: null };
     const saved = await saveProject(project); if (saved === null) return;
     state.videoId = project.id;
-    await actions.importScript(project, project.outputs.video, project.title);
+    await actions.importScript(project, script, project.title);
     await refreshSummaries(); showHome(project.id);
     toast('文案已送入同一项目，确认信息后可进入剪辑');
   }
@@ -351,7 +357,7 @@ export function createProjectWorkspace({ app, state, saveProject, callAi, requir
       target.brief = structuredClone(project.brief);
       target.facts = structuredClone(project.facts || []);
       target.outputs = structuredClone(project.outputs || null);
-      target.video.script = project.outputs?.video?.shots?.map(shot => shot.narration || '').filter(Boolean).join('\n') || project.science?.result?.explanation || '';
+      target.video.script = writingOutput(project, 'video')?.shots?.map(shot => shot.narration || '').filter(Boolean).join('\n') || project.science?.result?.explanation || '';
       if (await saveProject(target) === null) throw new Error('关联视频项目尚未保存，请重试。');
       const linked = await api('/api/projects/' + encodeURIComponent(target.id) + '/source-link', { sourceProjectId: project.id });
       if (linked.project) target = linked.project;

@@ -6,6 +6,7 @@ import { startServer } from '../server.mjs';
 import { writeDesktopRuntime } from '../lib/desktop-session.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const APP_VERSION = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8')).version;
 const dataDir = path.resolve(process.env.GUANGXUAN_USER_DATA || path.join(process.env.LOCALAPPDATA || process.env.APPDATA || ROOT, 'GuangxuanStudio'));
 const stateFile = path.join(dataDir, 'desktop-runtime.json');
 const preferencesFile = path.join(dataDir, 'desktop-preferences.json');
@@ -94,7 +95,7 @@ async function runManagedServer() {
     }
     if (req.url === '/api/desktop/status' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-      res.end(JSON.stringify({ app: 'GuangxuanStudioDesktopLauncher', instanceId, version: '0.2.0' }));
+      res.end(JSON.stringify({ app: 'GuangxuanStudioDesktopLauncher', instanceId, version: APP_VERSION }));
       return;
     }
     if (req.url === '/api/desktop/shutdown' && req.method === 'POST') {
