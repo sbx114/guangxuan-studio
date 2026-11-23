@@ -395,6 +395,8 @@ export interface TimelineBlock {
   inMs?: number;
   /** Source ms per film ms (the clip's `speed`); absent = 1. The block covers `[inMs, inMs + length × speed)` of its source. */
   speed?: number;
+  /** Only an explicit source loop wraps rhythm points; a source shorter than a clip is not guessed to loop. */
+  loop?: boolean;
   /** Gain in dB. */
   gainDb?: number;
   /** Linear volume from film.html; 1 = as is. */
@@ -508,6 +510,7 @@ export interface TimelineFilm {
     inMs?: number;
     speed?: number;
     rate?: number;
+    loop?: boolean;
     gainDb?: number;
     duck?: boolean;
     off?: boolean;
@@ -763,6 +766,7 @@ function soundBlockOf(s: TimelineFilm['sounds'][number]): Block {
     ...(s.clipId ? { clipId: s.clipId } : {}),
     ...(s.off ? { off: true } : {}),
     ...speedOf(s.speed ?? s.rate),
+    ...(s.loop ? { loop: true } : {}),
     ...audioExtras(s),
     ...trimRoom(s.durMs, s.sourceDurMs, s.inMs, s.speed ?? s.rate),
     ...metaFields(s.meta),

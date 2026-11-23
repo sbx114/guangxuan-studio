@@ -18,6 +18,12 @@ import { hasAlpha } from '../../src/seekable.mjs';
 import { readable } from './files.mjs';
 import { TOOL_DIR } from './projects.mjs';
 import { writeAtomic } from './atomic.mjs';
+import { analyzeRhythm } from '../../lib/music-rhythm.mjs';
+
+export const RHYTHM_LIMITS = Object.freeze({ seconds: 600, pcmBytes: 64 << 20, sourceBytes: 256 << 20, sampleRate: 22050, timeoutMs: 90000 });
+const RHYTHM_SLOTS = { size: 1, busy: 0, waiting: /** @type {(() => void)[]} */ ([]) };
+const rhythmPending = new Map();
+const rhythmAlgorithm = createHash('sha256').update(await readFile(new URL('../../lib/music-rhythm.mjs', import.meta.url))).digest('hex');
 
 export class MediaError extends Error {
   /** @param {string} message @param {number} status */
@@ -33,12 +39,12 @@ const SLOTS = { size: 3, busy: 0, waiting: [] };
 /** @type {Slots} */
 const SOUND_SLOTS = { size: 2, busy: 0, waiting: [] };
 /** Run `tool` with `args` when one of `slots` is free; resolves with its stdout (`stderr`: its stderr) as a Buffer. */
-async function tool(/** @type {'ffmpeg' | 'ffprobe'} */ name, /** @type {string[]} */ args, slots = SLOTS, stderrOut = false) {
+async function tool(/** @type {'ffmpeg' | 'ffprobe'} */ name, /** @type {string[]} */ args, slots = SLOTS, stderrOut = false, timeout = 0) {
   if (slots.busy >= slots.size) await new Promise((r) => slots.waiting.push(() => r(undefined)));
   slots.busy++;
   try {
     return await new Promise((resolve, reject) => {
-      execFile(name, args, { encoding: 'buffer', maxBuffer: 64 << 20, windowsHide: true }, (error, stdout, stderr) => {
+      execFile(name, args, { encoding: 'buffer', maxBuffer: 64 << 20, windowsHide: true, ...(timeout ? { timeout } : {}) }, (error, stdout, stderr) => {
         if (!error) return resolve(stderrOut ? stderr : stdout);
         if (/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT') {
           return reject(new MediaError(`${name} is not installed (macOS: brew install ffmpeg · Debian/Ubuntu: sudo apt install ffmpeg · Windows: winget install ffmpeg)`, 501));
@@ -171,6 +177,79 @@ export async function waveform(root, rel) {
     return Buffer.from(JSON.stringify(peaks.done()));
   });
   return JSON.parse(bytes.toString());
+}
+
+/** The source's content identity, not its timestamp. Nothing here names a host path in the returned JSON. */
+/** @param {string} root @param {string} rel */
+async function rhythmSource(root, rel) {
+  let value, info;
+  try { value = await source(root, rel); info = await stat(value.abs); }
+  catch { throw new MediaError('音乐源文件不可读取或不属于当前工程。', 404); }
+  if (info.size > RHYTHM_LIMITS.sourceBytes) throw new MediaError('音频文件超过256 MiB完整校验上限；请先提取要使用的片段。', 413);
+  const hash = createHash('sha256');
+  try { for await (const chunk of createReadStream(value.abs)) hash.update(chunk); }
+  catch { throw new MediaError('音乐源文件读取未完成，请重新识别。', 409); }
+  return { ...value, sourceVersion: hash.digest('hex') };
+}
+
+/** Decode exactly the requested source interval. An exceeded bound is rejected, never treated as complete audio. */
+/** @param {string} abs @param {number} from @param {number} to @param {number} timeoutMs @returns {Promise<Buffer>} */
+async function rhythmPcm(abs, from, to, timeoutMs = RHYTHM_LIMITS.timeoutMs) {
+  if (RHYTHM_SLOTS.busy >= RHYTHM_SLOTS.size) await new Promise(resolve => RHYTHM_SLOTS.waiting.push(() => resolve(undefined)));
+  RHYTHM_SLOTS.busy++;
+  try {
+    return await new Promise((resolve, reject) => {
+      const args = ['-v', 'error', ...(from ? ['-ss', String(from)] : []), '-i', abs, '-t', String(to - from), '-vn', '-ac', '1', '-ar', String(RHYTHM_LIMITS.sampleRate), '-f', 'f32le', '-'];
+      const child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      const pieces = /** @type {Buffer[]} */ ([]); let count = 0, settled = false;
+      let failure = /** @type {MediaError | null} */ (null);
+      const timer = setTimeout(() => { failure = new MediaError('节奏分析超过90秒，尚未提供完整分析结果。', 408); child.kill(); }, Math.max(1, timeoutMs));
+      const finish = (/** @type {Error | null} */ error, value = Buffer.alloc(0)) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
+      child.stdout.on('data', piece => { count += piece.length; if (count > RHYTHM_LIMITS.pcmBytes) { failure = new MediaError('音频解码超过64 MiB安全上限，未分析截断音频。', 413); child.kill(); } else if (!failure) pieces.push(piece); });
+      child.stderr.on('data', () => {});
+      child.on('error', (/** @type {NodeJS.ErrnoException} */ error) => finish(new MediaError(error.code === 'ENOENT' ? '节奏分析需要可用的本地FFmpeg。' : '本地音频解码未能启动。', error.code === 'ENOENT' ? 501 : 422)));
+      child.on('close', code => { if (failure) return finish(failure); if (code !== 0 || count % 4) return finish(new MediaError('本地音频解码未完成，未提供节奏点。')); finish(null, Buffer.concat(pieces)); });
+    });
+  } finally { RHYTHM_SLOTS.busy--; RHYTHM_SLOTS.waiting.shift()?.(); }
+}
+
+/** Real audio analysis, from/to are source seconds. Whole-file analysis is never silently shortened. */
+/** @param {string} root @param {string} rel @param {{from?: number, to?: number, fresh?: boolean}} options */
+export async function rhythm(root, rel, { from = 0, to, fresh = false } = {}) {
+  const deadline = Date.now() + RHYTHM_LIMITS.timeoutMs;
+  if (!Number.isFinite(from) || from < 0 || (to !== undefined && (!Number.isFinite(to) || !(to > from)))) throw new MediaError('节奏分析源范围无效。', 400);
+  const before = await rhythmSource(root, rel);
+  let metadata;
+  try {
+    const raw = JSON.parse((await tool('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', before.abs], SLOTS, false, Math.max(1, deadline - Date.now()))).toString());
+    metadata = { duration: Number(raw.format?.duration), audio: raw.streams?.some((/** @type {{codec_type?: string}} */ stream) => stream.codec_type === 'audio') };
+  } catch { throw new MediaError('无法在90秒内读取本地音频信息，请检查FFprobe及音频文件。', 422); }
+  if (!metadata.audio || !(metadata.duration > 0)) throw new MediaError('此文件没有可分析的音频或有效时长。', 422);
+  const end = to ?? metadata.duration;
+  if (from >= metadata.duration || end > metadata.duration + .001) throw new MediaError('节奏分析源范围超过音频时长。', 400);
+  if (end - from > RHYTHM_LIMITS.seconds) throw new MediaError('完整节奏分析每次最多10分钟；长文件请明确选择不超过10分钟的源片段。', 413);
+  const key = createHash('sha256').update(JSON.stringify([before.sourceVersion, rhythmAlgorithm, from, end, RHYTHM_LIMITS.sampleRate])).digest('hex');
+  const pendingKey = `${root}\0${key}`;
+  let task = !fresh && rhythmPending.get(pendingKey);
+  if (!task) {
+    const make = async () => {
+      const bytes = await rhythmPcm(before.abs, from, end, deadline - Date.now());
+      const pcm = new Float32Array(bytes.length / 4);
+      for (let i = 0; i < pcm.length; i++) pcm[i] = bytes.readFloatLE(i * 4);
+      const after = await rhythmSource(root, rel);
+      if (after.sourceVersion !== before.sourceVersion) throw new MediaError('源音频在分析期间发生变化，请重新识别。', 409);
+      const analyzed = analyzeRhythm(pcm, RHYTHM_LIMITS.sampleRate, { offsetSeconds: from });
+      if (Date.now() > deadline) throw new MediaError('节奏分析超过90秒，请缩短明确源范围后重新识别。', 408);
+      return Buffer.from(JSON.stringify({ ...analyzed, sourceDuration: metadata.duration, sourceVersion: before.sourceVersion, sampleRate: RHYTHM_LIMITS.sampleRate, coverage: { ...analyzed.coverage, completeSource: from === 0 && Math.abs(analyzed.coverage.end - metadata.duration) < .05, requestedStart: from, requestedEnd: end }, limits: { maxSeconds: RHYTHM_LIMITS.seconds, maxPcmBytes: RHYTHM_LIMITS.pcmBytes } }));
+    };
+    task = fresh ? make() : cached(root, 'rhythm', `${key}.json`, make);
+    rhythmPending.set(pendingKey, task);
+    task.finally(() => { if (rhythmPending.get(pendingKey) === task) rhythmPending.delete(pendingKey); }).catch(() => {});
+  }
+  const result = JSON.parse((await task).toString());
+  const finalSource = await rhythmSource(root, rel);
+  if (finalSource.sourceVersion !== before.sourceVersion || result.sourceVersion !== before.sourceVersion) throw new MediaError('源音频版本已更新，请重新识别。', 409);
+  return result;
 }
 
 /** @type {Map<string, Promise<Buffer>>} */

@@ -10,6 +10,8 @@ type TimelineBridge = { selection: () => { range: { start: number; end: number }
 let timelineBridge: { id: string; value: TimelineBridge } | null = null;
 const exportChecks = new Map<string, { resolve: (value: boolean) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; id: string }>();
 const importReports = new Map<string, { at: number; status: string }>();
+export interface ManagedMusicResult { revision?: string; cutTimes?: number[]; beatCount?: number; summary?: string; undo?: { id: string; label: string } }
+const musicRequests = new Map<string, { id: string; kind: 'cut' | 'undo'; resolve: (result: ManagedMusicResult) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 const routeProject = () => /^\/projects\/([\w-]+)/.exec(location.pathname)?.[1] ?? null;
 const ownerOf = (id: string | null | undefined) => id ? ownedSubviews.get(id) ?? id : null;
 const identity = (id: string | null | undefined) => ({ nativeProjectId: id ?? null, ownerNativeProjectId: ownerOf(id) });
@@ -62,6 +64,30 @@ export function registerStudioTimeline(nativeProjectId: string, value: TimelineB
   const registered = { id: nativeProjectId, value };
   timelineBridge = registered;
   return () => { if (timelineBridge === registered) timelineBridge = null; };
+}
+export function hasManagedMusicHost(nativeProjectId: string): boolean {
+  return Boolean(parentOrigin && window.parent !== window && nativeProjectId === ownerNativeProjectId && nativeProjectId === routeProject() && flusher?.id === nativeProjectId);
+}
+/** An explicit click, with the current film flushed first. Client beat arrays are never sent as authority. */
+async function managedMusicRequest(nativeProjectId: string, kind: 'cut' | 'undo', extra: Record<string, unknown>) {
+  if (!hasManagedMusicHost(nativeProjectId)) throw new Error('按音乐自动卡点需要在 Gx 视频主时间线中使用。');
+  const current = flusher!;
+  await current.run(); await Promise.all([...(auxiliaries.get(nativeProjectId) ?? [])].map(run => run()));
+  if (current !== flusher || !hasManagedMusicHost(nativeProjectId)) throw new Error('工程已切换，本次音乐操作尚未发送。');
+  const requestId = crypto.randomUUID();
+  return new Promise<ManagedMusicResult>((resolve, reject) => {
+    const timer = setTimeout(() => { musicRequests.delete(requestId); reject(new Error('音乐操作等待超时，请先查看当前工程状态。')); }, 150000);
+    musicRequests.set(requestId, { id: nativeProjectId, kind, resolve, reject, timer });
+    send(kind === 'cut' ? 'guangxuan:studio-music-cut' : 'guangxuan:studio-music-undo', { ...identity(nativeProjectId), requestId, ...extra });
+  });
+}
+export function requestManagedMusicCut(nativeProjectId: string, data: { clipId: string; sourcePath: string; sourceVersion: string; cadence?: 'auto' | 'beat' | 'half' | 'strong' }) {
+  if (!data.clipId || !data.sourcePath || !/^[a-f0-9]{64}$/.test(data.sourceVersion)) return Promise.reject(new Error('当前音乐分析或片段身份不完整，请重新识别。'));
+  return managedMusicRequest(nativeProjectId, 'cut', data);
+}
+export function requestManagedMusicUndo(nativeProjectId: string, undoId: string) {
+  if (!undoId) return Promise.reject(new Error('此音乐操作没有可用的撤销记录。'));
+  return managedMusicRequest(nativeProjectId, 'undo', { undoId });
 }
 /** A deliberate user action; the parent opens the composer and never submits automatically. */
 export async function requestManagedRangeEdit(nativeProjectId: string) {
@@ -123,6 +149,15 @@ void fetch('/api/integration').then(response => response.ok ? response.json() : 
 
 window.addEventListener('message', event => {
   if (!parentOrigin || event.source !== window.parent || event.origin !== parentOrigin) return;
+  if (event.data?.type === 'guangxuan:studio-music-cut-result' || event.data?.type === 'guangxuan:studio-music-undo-result') {
+    const pending = musicRequests.get(event.data.requestId);
+    if (!pending || event.data.nativeProjectId !== pending.id || event.data.type !== (pending.kind === 'cut' ? 'guangxuan:studio-music-cut-result' : 'guangxuan:studio-music-undo-result')) return;
+    clearTimeout(pending.timer); musicRequests.delete(event.data.requestId);
+    if (!hasManagedMusicHost(pending.id)) { pending.reject(new Error('工程已切换，请查看原工程结果。')); return; }
+    if (event.data.ok !== true) pending.reject(new Error(String(event.data.error?.message || '音乐操作未完成。').slice(0, 300)));
+    else pending.resolve(event.data.result && typeof event.data.result === 'object' ? event.data.result : {});
+    return;
+  }
   if (event.data?.type === 'guangxuan:studio-export-checked' && typeof event.data.requestId === 'string') {
     const pending = exportChecks.get(event.data.requestId);
     if (!pending) return;

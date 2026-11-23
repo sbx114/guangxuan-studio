@@ -7,7 +7,10 @@
  * are written one at a time (see editor/use-film.ts); the agent's writes come in through the folder's events.
  */
 import * as React from 'react';
-import { registerStudioFlush, registerStudioTimeline, requestManagedRangeEdit, showManagedArchive, showManagedProjectInfo } from '../guangxuan-host';
+import { hasManagedMusicHost, registerStudioFlush, registerStudioTimeline, requestManagedMusicCut, requestManagedMusicUndo, requestManagedRangeEdit, showManagedArchive, showManagedProjectInfo, type ManagedMusicResult } from '../guangxuan-host';
+import { useMusicRhythm, rhythmSound } from './useMusicRhythm';
+import { MusicRhythmPanel } from './MusicRhythmPanel';
+import { rhythmSnapTimes } from '@/lib/music-rhythm';
 import { afterPaintIdle } from '@/lib/after-paint-idle';
 import { loadCanvas } from './canvas/load';
 import { CanvasLoading } from './canvas/CanvasLoading';
@@ -3752,6 +3755,35 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const version = compoundFolder(src) ? `${mtime}.${waveEpoch.current}.${filesTick}` : mtime;
     return `/api/projects/${encodeURIComponent(projectId)}/media?what=wave&path=${encodeURIComponent(src)}&v=${version}`;
   }, [projectId, mtimeOf, filesTick]);
+  const musicRhythm = useMusicRhythm(projectId, blocksRef.current, waveUrl);
+  const [rhythmShown, setRhythmShown] = React.useState(true);
+  const [musicBusy, setMusicBusy] = React.useState(false);
+  const [musicMessage, setMusicMessage] = React.useState('');
+  const [musicResult, setMusicResult] = React.useState<ManagedMusicResult | null>(null);
+  const musicProjectRef = React.useRef(projectId); musicProjectRef.current = projectId;
+  const selectedMusic = selectedBlocks.length === 1 && rhythmSound(selectedBlocks[0]) ? selectedBlocks[0] : null;
+  React.useEffect(() => { setMusicResult(null); setMusicMessage(''); setMusicBusy(false); }, [projectId]);
+  const musicCut = React.useCallback(async () => {
+    if (!selectedMusic?.src || musicBusy) return;
+    const state = musicRhythm.states.get(selectedMusic.id), analysis = state?.value;
+    if (state?.status !== 'ready' || analysis?.status !== 'ready' || analysis.tempoConfidence < .55) { setMusicMessage('节奏置信度不足，尚未修改影片。'); return; }
+    setMusicBusy(true); setMusicMessage('正在按当前音乐节奏处理…');
+    try {
+      const result = await requestManagedMusicCut(projectId, { clipId: selectedMusic.clipId || selectedMusic.id, sourcePath: selectedMusic.src, sourceVersion: analysis.sourceVersion, cadence: 'auto' });
+      if (musicProjectRef.current !== projectId) return;
+      setMusicResult(result); setMusicMessage(result.summary || `已按音乐安排 ${result.cutTimes?.length || 0} 个剪辑点。`);
+      const latest = await api.film(projectId); if (musicProjectRef.current !== projectId) return; setLoaded(latest); preview.current?.reload?.();
+    } catch (error) { if (musicProjectRef.current === projectId) setMusicMessage(error instanceof Error ? error.message : '音乐卡点未完成。'); }
+    finally { if (musicProjectRef.current === projectId) setMusicBusy(false); }
+  }, [selectedMusic, musicBusy, musicRhythm.states, projectId]);
+  const musicUndo = React.useCallback(async () => {
+    if (!musicResult?.undo?.id || musicBusy) return;
+    setMusicBusy(true);
+    try { await requestManagedMusicUndo(projectId, musicResult.undo.id); if (musicProjectRef.current !== projectId) return; const latest = await api.film(projectId); if (musicProjectRef.current !== projectId) return; setLoaded(latest); preview.current?.reload?.(); setMusicResult(null); setMusicMessage('已撤销这次音乐卡点。'); }
+    catch (error) { if (musicProjectRef.current === projectId) setMusicMessage(error instanceof Error ? error.message : '撤销未完成。'); }
+    finally { if (musicProjectRef.current === projectId) setMusicBusy(false); }
+  }, [musicResult, musicBusy, projectId]);
+  const musicSnap = React.useMemo(() => rhythmShown ? blocksRef.current.flatMap(block => rhythmSnapTimes(musicRhythm.states.get(block.id), block)) : [], [musicRhythm.states, rhythmShown, timelineTracks]);
   /* clips whose files are gone, and where the same name may be now. A file a clip names that the listing does not have
      is gone only once a listing read after it was first named still lacks it: one just brought in as its clip was put
      on the timeline (from Saved, the library) is not in the listing read before, and is not shown missing meanwhile */
@@ -4922,6 +4954,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                 <>
                   {!editFree ? <PaneDivider width={inspectorShownWidth} onResize={commitInspectorWidth} containerRef={viewerRowRef} label={t('inspector.resize')} min={MIN_INSPECTOR} minRest={MIN_VIEWER} relative side={editPrefs.inspectorSide === 'left' ? 'start' : 'end'} style={{ order: editPrefs.inspectorSide === 'left' ? 21 : 79 }} /> : null}
                   <div className={`${PANE} shrink-0 bg-[var(--bg-panel)]`} data-workspace-inspector style={{ width: inspectorShownWidth, order: editPrefs.inspectorSide === 'left' ? 20 : 80, ...freeStyle('inspector') }}>
+                  {selectedMusic ? <MusicRhythmPanel state={musicRhythm.states.get(selectedMusic.id)} shown={rhythmShown} toggle={setRhythmShown} retry={musicRhythm.retry} cut={() => { void musicCut(); }} undo={musicResult?.undo ? () => { void musicUndo(); } : undefined} busy={musicBusy} message={musicMessage} managed={hasManagedMusicHost(projectId)} /> : null}
                   {typeof inspectorContent === 'object' ? (
                     <ResourceInspector file={inspectorContent} url={(pickedSaved && inspectorContent === pickedMedia ? savedSources : mediaSources).file(inspectorContent)} width={inspectorShownWidth} onClose={closeInspector} />
                   ) : inspectorContent === 'captions' ? (
@@ -5058,6 +5091,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                     history={timelineHistory}
                     recorder={recorder}
                     {...tools.timeline}
+                    musicRhythm={{ shown: rhythmShown, states: musicRhythm.states }}
+                    snapPointsMs={[...(tools.timeline.snapPointsMs || []), ...musicSnap]}
                     /* a file dropped on a template's clip goes in its place there, without ⇧ */
                     dropInto={(b) => templateFolderOf(b.src) != null}
                     onReplaceDrop={(b, f, atMs) => { if (templateFolderOf(b.src) && atMs != null) void dropOnTemplate(b, f, atMs); else tools.timeline.onReplaceDrop(b, f as never); }}

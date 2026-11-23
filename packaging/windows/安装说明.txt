@@ -1,4 +1,4 @@
-Gx 0.2.1 Windows x64 安装版
+Gx 0.2.2 Windows x64 安装版
 
 运行 Setup.exe，选择安装目录即可。安装仅用于当前 Windows 账户，无需管理员权限。
 从开始菜单的“Gx”或安装目录中的 Gx.exe 打开应用，无需预装 Node.js。

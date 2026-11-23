@@ -156,6 +156,8 @@ import {
 import { OperationHistory, trackFlagStep, type SessionTimeline } from './OperationHistory';
 import { BlockThumbs } from './BlockThumbs';
 import { BlockWaveform } from './BlockWaveform';
+import { MusicRhythmLines } from './MusicRhythmLines';
+import type { RhythmState } from '@/lib/music-rhythm';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { toggleClipEdits } from '@/lib/film-clip-edits';
 import type { PlaybackClock } from './LiveTime';
@@ -683,6 +685,7 @@ export interface TimelineProps {
   onViewChange?: (view: { fromMs: number; toMs: number; pxPerMs: number }) => void;
   /** A clip's waveform address, from its src. Without it no waveforms are drawn. */
   waveUrl?: (src: string) => string;
+  musicRhythm?: { shown: boolean; states: ReadonlyMap<string, RhythmState> };
   /** Copy clips (the clipboard lives outside, so it survives across tracks and projects). */
   onCopy?: (blocks: readonly TimelineBlock[]) => void;
   /** Export this clip alone (MG only), by film.html clip id. */
@@ -1014,6 +1017,7 @@ export const Timeline = React.memo(function Timeline({
   onRelink,
   onViewChange,
   waveUrl,
+  musicRhythm,
   history,
   selected: selectedProp,
   onSelectedChange,
@@ -3399,6 +3403,9 @@ export const Timeline = React.memo(function Timeline({
                     inMs={waveInMs}
                     durMs={waveDurMs}
                   />
+                ) : null}
+                {!visual && musicRhythm?.shown && block.src && width > 8 ? (
+                  <MusicRhythmLines state={musicRhythm.states.get(block.id)} clip={{ startMs, endMs, inMs: waveInMs, speed: thumbSpeed, sourceDurMs: block.sourceDurMs, loop: block.loop }} pxPerMs={pxPerMs} top={INFO_H} />
                 ) : null}
                 </div>
                 {/* frame and handles stay while trimming (the hand is on one of them); hidden while the clip floats */}

@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { chromium } from 'playwright-core';
+import { startServer } from '../server.mjs';
+const command = promisify(execFile);
+const until = async (read, accept, timeout = 60000) => { const end = Date.now() + timeout; while (Date.now() < end) { const value = await read(); if (accept(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); } assert.fail('Actual rhythm UI did not settle'); };
+test('actual Gx music rhythm UI draws real points, toggles them, and completes host cut and undo without a model', { timeout: 120000 }, async t => {
+  const parent = path.resolve(process.env.GUANGXUAN_TEST_DIR || os.tmpdir()); await fs.mkdir(parent, { recursive: true });
+  const folder = await fs.mkdtemp(path.join(parent, 'gx-music-ui-')), dataDir = path.join(folder, 'data'); let app, browser;
+  t.after(async () => { await browser?.close(); await app?.close(); if (!folder.startsWith(parent + path.sep)) throw Error('Fixture cleanup escaped its parent'); await fs.rm(folder, { recursive: true, force: true }); });
+  const ffmpeg = process.env.GUANGXUAN_BIN_DIR ? path.join(process.env.GUANGXUAN_BIN_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : 'ffmpeg';
+  const picture = path.join(folder, 'picture.mp4'), music = path.join(folder, 'music.wav');
+  await command(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=navy:s=320x180:r=30:d=8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', picture], { windowsHide: true });
+  const rate = 8000, pcm = Buffer.alloc(rate * 8 * 2); for (let n = 0; n < rate * 8; n++) { const time = n / rate, into = ((time - .1) % .5 + .5) % .5; pcm.writeInt16LE(time >= .1 && into < .07 ? Math.round(.7 * Math.exp(-into * 65) * Math.sin(2 * Math.PI * 900 * into) * 32767) : 0, n * 2); }
+  const wav = Buffer.alloc(pcm.length + 44); wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(pcm.length, 40); pcm.copy(wav, 44); await fs.writeFile(music, wav);
+  app = await startServer({ port: 0, dataDir }); assert.notEqual(new URL(app.url).port, '4417');
+  const api = async (route, body, method = 'POST') => { const r = await fetch(app.url + route, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); const v = await r.json(); assert.ok(r.ok, JSON.stringify(v)); return v; };
+  const assets = (await api('/api/video/import-local', { paths: [picture, music] })).assets, video = assets.find(a => a.type === 'video'), sound = assets.find(a => a.type === 'audio'), id = 'rhythm-ui-test';
+  await api('/api/projects/' + id, { kind: 'video', title: 'Rhythm UI fixture', source: { text: 'Synthetic local inputs only' }, video: { timeline: [{ id: 'picture-one', assetId: video.id, start: 0, end: 8 }], captions: [], aspect: '16:9', resolution: '720', music: { assetId: sound.id, volume: .2 } } }, 'PUT');
+  browser = await chromium.launch({ channel: 'msedge', headless: true }); const page = await browser.newPage({ viewport: { width: 1560, height: 1050 }, locale: 'zh-CN' });
+  const modelRequests = []; page.on('request', request => { if (request.method() === 'POST' && (request.url().endsWith('/api/ai') || request.url().endsWith('/api/assistant/runs'))) modelRequests.push(request.url()); });
+  await page.route('**/rhine/index.html?embed=1', route => route.continue({ url: route.request().url() + '&review=1&skipBoot=1&scene=archive' })); await page.goto(app.url);
+  const home = page.frameLocator('.rhine-home-frame'); await home.locator('[data-action="search"]').click(); await home.locator('#archive-search').fill('Rhythm UI fixture'); await home.locator('.result-row').first().click(); await home.locator('#edit-project').click();
+  const native = await until(async () => { const f = page.frames().find(frame => /\/projects\//.test(frame.url())); return f && await f.locator('[data-rhythm-point]').count() >= 12 ? f : null; }, Boolean);
+  const song = native.locator('[data-block-id]').filter({ has: native.locator('[data-music-rhythm-lines]') }).first(); await song.click();
+  assert.match(await native.locator('[data-music-rhythm-status]').innerText(), /120 BPM/); assert.equal(await native.locator('[data-rhythm-cut]').isDisabled(), false);
+  await native.getByLabel('显示音乐节奏点').uncheck(); await until(() => native.locator('[data-rhythm-point]').count(), count => count === 0); await native.getByLabel('显示音乐节奏点').check(); await native.locator('[data-rhythm-point]').first().waitFor();
+  const film = path.join(dataDir, 'openfilm/projects', id, 'film.html'), before = await fs.readFile(film, 'utf8');
+  await native.locator('[data-rhythm-cut]').click(); await native.locator('[data-rhythm-undo]').waitFor({ timeout: 60000 }); assert.notEqual(await fs.readFile(film, 'utf8'), before);
+  await native.locator('[data-rhythm-undo]').click(); await until(() => native.locator('[data-music-cut-status]').innerText(), value => value.includes('已撤销')); assert.equal(await fs.readFile(film, 'utf8'), before);
+  const direct = await browser.newPage({ viewport: { width: 1360, height: 950 }, locale: 'zh-CN' }); await direct.goto(native.url()); const standaloneSong = direct.locator('[data-block-id]').filter({ has: direct.locator('[data-music-rhythm-lines]') }).first(); await standaloneSong.waitFor({ timeout: 60000 }); await standaloneSong.click(); assert.equal(await direct.locator('[data-rhythm-cut]').isDisabled(), true);
+  assert.deepEqual(modelRequests, []);
+});

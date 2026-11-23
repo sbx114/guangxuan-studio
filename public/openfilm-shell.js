@@ -32,6 +32,7 @@ window.addEventListener('message', event => {
     if (event.data?.type === 'guangxuan:studio-flush' && validId(event.data.requestId)) studio?.contentWindow?.postMessage({ type: 'guangxuan:studio-flush', requestId: event.data.requestId }, nativeOrigin);
     if (event.data?.type === 'guangxuan:studio-timeline-request' && validId(event.data.requestId)) studio?.contentWindow?.postMessage({ type: event.data.type, requestId: event.data.requestId, ...(event.data.seek ? { seek: event.data.seek } : {}) }, nativeOrigin);
     if (event.data?.type === 'guangxuan:studio-export-checked' && validId(event.data.requestId)) studio?.contentWindow?.postMessage({ type: event.data.type, requestId: event.data.requestId, allowed: event.data.allowed === true, ...(event.data.error ? { error: String(event.data.error).slice(0, 300) } : {}) }, nativeOrigin);
+    if (['guangxuan:studio-music-cut-result', 'guangxuan:studio-music-undo-result'].includes(event.data?.type) && validId(event.data.requestId) && event.data.projectId === projectId) studio?.contentWindow?.postMessage({ ...event.data, nativeProjectId }, nativeOrigin);
     return;
   }
   if (!studio || event.source !== studio.contentWindow || event.origin !== nativeOrigin || !event.data || typeof event.data !== 'object') return;
@@ -41,6 +42,7 @@ window.addEventListener('message', event => {
   if (data.type === 'guangxuan:studio-import-progress' && owner === nativeProjectId && data.import && typeof data.import === 'object') sendParent({ type: data.type, projectId, import: data.import });
   if (data.type === 'guangxuan:studio-timeline-result' && validId(data.requestId) && owner === nativeProjectId) sendParent({ type: data.type, projectId, requestId: data.requestId, selection: data.selection, ...(data.error ? { error: String(data.error).slice(0, 300) } : {}) });
   if (data.type === 'guangxuan:studio-before-export' && validId(data.requestId) && owner === nativeProjectId && Array.isArray(data.specs) && data.specs.length <= 40) sendParent({ type: data.type, projectId, requestId: data.requestId, specs: data.specs });
+  if (['guangxuan:studio-music-cut', 'guangxuan:studio-music-undo'].includes(data.type) && validId(data.requestId) && owner === nativeProjectId && data.nativeProjectId === nativeProjectId) sendParent({ type: data.type, projectId, nativeProjectId, requestId: data.requestId, ...(data.type === 'guangxuan:studio-music-cut' ? { clipId: data.clipId, sourcePath: data.sourcePath, sourceVersion: data.sourceVersion, cadence: data.cadence || 'auto' } : { undoId: data.undoId }) });
   if (data.type === 'guangxuan:studio-ready' || data.type === 'guangxuan:studio-project-ready') {
     if (!nativeProjectId || owner !== nativeProjectId) {
       if (visible && !switching) sendParent({ type: 'guangxuan:studio-unexpected-project', projectId });

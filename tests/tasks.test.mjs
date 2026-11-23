@@ -89,6 +89,23 @@ test('cancellation aborts actual runner and late completion cannot resurrect a c
   await service.cancel(taskId); assert.equal(cancellations, 1);
 });
 
+test('music editing can retain an acknowledged commit after Stop, while unacknowledged late work stays cancelled', async t => {
+  const { service, reopen } = await fixture(t);
+  const acceptCommittedResult = result => result?.applied === true && typeof result.nativeUndoId === 'string' && /^[a-f0-9]{16}$/.test(result.revision || '') && /^[a-f0-9]{64}$/.test(result.sourceVersion || '');
+  const receipt = { applied: true, nativeUndoId: 'native-receipt-fixture', revision: 'a'.repeat(16), sourceVersion: 'b'.repeat(64), cancelledAfterCommit: true };
+  let committedTask, rejectedTask;
+  const entered = deferred(), release = deferred();
+  const committed = service.track({ projectId: 'a', type: 'editing' }, async ({ signal }) => { entered.resolve(); await release.promise; assert.equal(signal.aborted, true); return receipt; }, { safeRetry: false, acceptCommittedResult, onTask: id => { committedTask = id; } });
+  await entered.promise; await service.cancel(committedTask); release.resolve();
+  assert.strictEqual(await committed, receipt);
+  const saved = await service.get(committedTask); assert.equal(saved.status, 'succeeded'); assert.equal(saved.phase, '停止前已提交'); assert.match(saved.message, /撤销/); assert.equal(saved.canRetry, false); assert.equal(saved.canCancel, false);
+  const lateEntered = deferred(), lateRelease = deferred();
+  const late = service.track({ projectId: 'a', type: 'editing' }, async () => { lateEntered.resolve(); await lateRelease.promise; return { applied: true }; }, { acceptCommittedResult, onTask: id => { rejectedTask = id; } });
+  const rejection = assert.rejects(late, { name: 'AbortError' }); await lateEntered.promise; await service.cancel(rejectedTask); lateRelease.resolve(); await rejection;
+  assert.equal((await service.get(rejectedTask)).status, 'cancelled');
+  const restored = await reopen(); assert.equal((await restored.get(committedTask)).status, 'succeeded'); assert.equal((await restored.get(rejectedTask)).status, 'cancelled');
+});
+
 test('caller abort signals reach the runner, including already-aborted requests', async t => {
   const { service } = await fixture(t), entered = deferred(), controller = new AbortController();
   let taskId;

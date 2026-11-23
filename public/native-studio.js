@@ -9,7 +9,7 @@ export function createNativeStudio(container, { assistant, references, onBack, o
   let preferredWidth = 328, resizeDrag = null;
   try { const saved = Number(localStorage.getItem('guangxuan-assistant-width')); if (Number.isFinite(saved) && saved >= 180 && saved <= 680) preferredWidth = saved; } catch {}
   const lifecycle = new AbortController(), flushRequests = new Map();
-  const timelineRequests = new Map(), exportRequests = new Set();
+  const timelineRequests = new Map(), exportRequests = new Set(), musicRequests = new Set();
   const send = data => frame?.contentWindow?.postMessage(data, location.origin);
   const widthBounds = () => {
     const available = container.clientWidth || innerWidth;
@@ -129,6 +129,21 @@ export function createNativeStudio(container, { assistant, references, onBack, o
     if (data.type === 'guangxuan:studio-import-progress' && data.projectId === currentProject?.id && data.import && typeof data.import === 'object') {
       const { id, name, status, progress } = data.import;
       void api('/api/openfilm/import-progress', { projectId: data.projectId, id, name, status, progress }).catch(() => {});
+    }
+    if (['guangxuan:studio-music-cut', 'guangxuan:studio-music-undo'].includes(data.type) && data.projectId === currentProject?.id && data.nativeProjectId === currentProject?.nativeProjectId && typeof data.requestId === 'string' && !musicRequests.has(data.requestId)) {
+      const owner = currentProject.id, nativeId = currentProject.nativeProjectId, isUndo = data.type === 'guangxuan:studio-music-undo';
+      const responseType = isUndo ? 'guangxuan:studio-music-undo-result' : 'guangxuan:studio-music-cut-result';
+      musicRequests.add(data.requestId);
+      void (async () => {
+        try {
+          await flush();
+          if (owner !== currentProject?.id || nativeId !== currentProject?.nativeProjectId || !visible) throw new Error('工程已切换，未执行音乐卡点。');
+          const payload = isUndo ? { undoId: data.undoId } : { requestId: data.requestId, musicClipId: data.clipId, sourcePath: data.sourcePath, sourceVersion: data.sourceVersion, cadence: data.cadence || 'auto' };
+          const result = await api(`/api/projects/${encodeURIComponent(owner)}/music-${isUndo ? 'cut-undo' : 'cut'}`, payload);
+          if (owner === currentProject?.id && nativeId === currentProject?.nativeProjectId) { send({ type: responseType, projectId: owner, nativeProjectId: nativeId, requestId: data.requestId, ok: true, result }); onChanged?.(owner); }
+        } catch (error) { if (owner === currentProject?.id && nativeId === currentProject?.nativeProjectId) send({ type: responseType, projectId: owner, nativeProjectId: nativeId, requestId: data.requestId, ok: false, error: { code: error.code || 'MUSIC_CUT_FAILED', message: error.message || '音乐卡点未完成，现有工程保留。' } }); }
+        finally { musicRequests.delete(data.requestId); }
+      })();
     }
     if (data.type === 'guangxuan:studio-ready') finishReady(data.projectId);
     if (data.type === 'guangxuan:studio-loaded') { loaded = true; notifyProject(); }

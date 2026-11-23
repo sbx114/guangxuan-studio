@@ -23,6 +23,7 @@ test('copied installation runtime runs project/canvas capabilities and full VTT 
     await rm(directory, { recursive: true, force: true });
   });
   const inventory = await copyOpenFilmRuntime(appRoot, root);
+  assert.deepEqual(await readFile(path.join(appRoot, 'integrations/openfilm/packages/openfilm/lib/music-rhythm.mjs')), await readFile(path.join(root, 'integrations/openfilm/packages/openfilm/lib/music-rhythm.mjs')));
   for (const relative of appFiles) { const to = path.join(appRoot, relative); await mkdir(path.dirname(to), { recursive: true }); await copyFile(path.join(root, relative), to); }
   const playwright = path.dirname(await realpath(fileURLToPath(import.meta.resolve('playwright-core/package.json'))));
   await cp(playwright, path.join(appRoot, 'node_modules', 'playwright-core'), { recursive: true, dereference: true });

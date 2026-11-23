@@ -28,7 +28,7 @@ import { readPage, writePage } from './page-text.mjs';
 import { FileError, bringIn, collect, extractAudio, freezeFrame, importFile, inside, listFiles, makeFolder, moveCheck, moveFile, readable, relink, trashFile } from './files.mjs';
 import { mediaReferences } from '../../src/media-links.mjs';
 import { ExportError, createExports, draftApps, exportCapabilities, exportsRoot, projectSizes } from './exports.mjs';
-import { MediaError, frame, loudness, mixedWaveform, poster, probe, waveform } from './derived.mjs';
+import { MediaError, frame, loudness, mixedWaveform, poster, probe, rhythm, waveform } from './derived.mjs';
 import { HistoryError, checkoutVersion, copyVersion, deleteVersions, discardChanges, keepAside, log, recoverVersions, restoreFilm, saveVersion, status as historyStatus, versionFilesChanged } from './history.mjs';
 import * as personEdits from './person-edits.mjs';
 import { createAutoVersions } from './auto-versions.mjs';
@@ -1080,6 +1080,10 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
         }));
       }
       if (what === 'probe') return json(res, 200, await probe(project.path, at));
+      if (what === 'rhythm') {
+        const from = url.searchParams.get('from'), to = url.searchParams.get('to');
+        return json(res, 200, await rhythm(project.path, at, { from: from === null ? 0 : Number(from), ...(to === null ? {} : { to: Number(to) }), fresh: url.searchParams.get('fresh') === '1' }));
+      }
       if (what === 'wave' && compoundFolder(at)) {
         const base = pages.folderUrl(project);
         const root = compoundOuter(project.path);

@@ -36,6 +36,7 @@ import { createRemotionIntegration } from './lib/remotion-integration.mjs';
 import { createLocalDiagnostics } from './lib/local-diagnostics.mjs';
 import { createAssistantArtifactService } from './lib/assistant-artifacts.mjs';
 import { createConnectionStore } from './lib/connection-store.mjs';
+import { createMusicCutService } from './lib/music-cut-service.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const APP_VERSION = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -173,7 +174,8 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
   const mediaUnderstanding = await createAssistantMediaUnderstanding({ videoService, scienceDocuments, store, root: ROOT, transcribeAsset: (...args) => sourceAnalysis.transcribeAsset(...args) });
   const frameReader = videoService ? createAssistantFrameReader({ videoService, store, openFilm, sourceAnalysis, references }) : null;
   const artifacts = await createAssistantArtifactService({ dataDir, store, root: ROOT });
-  const assistantApps = createAssistantAppTools({ store, openFilm, videoService, references, writingReferences, sourceAnalysis, sourceLinks, scienceDocuments, novelLibrary, webTools: assistantWeb, downloads: assistantDownloads, videoImporter: urlReferences, mediaUnderstanding, frameReader, remotion, remotionProjects, preflight, tasks, taskAdapters, bundles, artifacts, projectCovers, root: ROOT });
+  const musicCuts = await createMusicCutService({ dataDir, store, openFilm });
+  const assistantApps = createAssistantAppTools({ store, openFilm, videoService, references, writingReferences, sourceAnalysis, sourceLinks, scienceDocuments, novelLibrary, webTools: assistantWeb, downloads: assistantDownloads, videoImporter: urlReferences, mediaUnderstanding, frameReader, remotion, remotionProjects, preflight, tasks, taskAdapters, bundles, artifacts, projectCovers, musicCuts, root: ROOT });
   let assistant, assistantTaskQueue = Promise.resolve();
   const assistantTaskStates = new Map();
   function assistantJob(job) {
@@ -395,6 +397,19 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
         return res.end(method === 'HEAD' ? undefined : bytes);
       }
       if (pathname === '/openfilm/editor.html' && ['GET', 'HEAD'].includes(method)) return openFilm.serveEditor(req, res, requestUrl);
+      const musicRoute = /^\/api\/projects\/([^/]+)\/music-(rhythm|cut|cut-undo)(?:\/([a-f0-9-]{36}))?$/.exec(pathname);
+      if (musicRoute) {
+        const projectId = validateProjectId(decodeURIComponent(musicRoute[1]));
+        if (method === 'GET' && musicRoute[2] === 'cut' && musicRoute[3]) return json(res, 200, await musicCuts.status(projectId, musicRoute[3]));
+        if (method !== 'POST' || musicRoute[3]) throw new AppError(405, '该音乐操作需要POST。', 'METHOD_NOT_ALLOWED');
+        const body = await readJson(req);
+        const allowed = musicRoute[2] === 'cut-undo' ? ['undoId'] : ['musicAssetId', 'musicClipId', 'sourceRange', 'sourcePath', 'sourceVersion', 'expectedRevision', ...(musicRoute[2] === 'cut' ? ['requestId', 'assetIds', 'range', 'timelineAt', 'musicSpeed', 'musicVolume', 'cadence', 'allowUncertain', 'reuseSources', 'originalVolume'] : [])];
+        if (Object.keys(body).some(key => !allowed.includes(key))) throw new AppError(400, '音乐操作不接受外部拍点或未知参数。', 'MUSIC_CUT_INPUT');
+        const context = { origin: requestUrl.origin, signal: controller.signal };
+        if (musicRoute[2] === 'rhythm') return json(res, 200, await musicCuts.analyze({ ...body, projectId }, context));
+        if (musicRoute[2] === 'cut-undo') return json(res, 200, await musicCuts.undo({ ...body, projectId }, context));
+        return json(res, 200, await tasks.track({ projectId, type: 'editing', title: '按音乐节奏自动卡点' }, async ({ update, signal }) => musicCuts.cut({ ...body, projectId }, { ...context, signal, update: phase => update({ phase }) }), { signal: controller.signal, safeRetry: false, acceptCommittedResult: result => result?.applied === true && typeof result.nativeUndoId === 'string' && /^[a-f0-9]{16}$/.test(result.revision || '') && /^[a-f0-9]{64}$/.test(result.sourceVersion || '') }));
+      }
       if (pathname === '/api/openfilm/status' && method === 'GET') return json(res, 200, await openFilm.status());
       if (pathname === '/api/openfilm/context' && method === 'GET') return json(res, 200, await openFilm.context(requestUrl.searchParams.get('projectId'), req.headers.origin || requestUrl.origin));
       if (pathname === '/api/openfilm/exports' && method === 'GET') return json(res, 200, await openFilm.nativeExports(validateProjectId(requestUrl.searchParams.get('projectId'))));
@@ -409,6 +424,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
           return json(res, 200, result);
         }
         if (pathname === '/api/openfilm/context') return json(res, 200, await openFilm.context(body.projectId, origin));
+        if (pathname === '/api/openfilm/import-asset') return json(res, 200, await openFilm.importAsset(body.projectId, body.assetId, origin, { expectedRevision: body.expectedRevision || body.revision, requestId: body.requestId, signal: controller.signal }));
         if (pathname === '/api/openfilm/apply-plan') return json(res, 200, await openFilm.applyPlan(body.projectId, body.plan || body, origin, body.expectedRevision || body.revision, { keepUndo: body.keepUndo === true, editScope: body.editScope }));
         if (pathname === '/api/openfilm/assistant-undo') return json(res, 200, await openFilm.undoAssistant(body.projectId, body.undoId, origin));
         if (pathname === '/api/openfilm/export') {
@@ -587,6 +603,7 @@ export async function startServer({ port = 0, host = '127.0.0.1', dataDir = proc
       }).then(async () => {
         await assistant.close();
         await assistantApps.close();
+        await musicCuts.close();
         await artifacts.close();
         await remotionProjects.close(); await remotion.close();
         await mediaUnderstanding.close?.();

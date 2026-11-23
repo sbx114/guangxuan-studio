@@ -1,7 +1,7 @@
 {
   "name": "guangxuan-studio",
   "productName": "Gx",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "AI 文案、原生剪辑与论文视觉小说桌面工作台",
   "type": "module",
   "main": "desktop/main.cjs",
