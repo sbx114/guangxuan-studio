@@ -67,7 +67,7 @@ function renderShell(){
  if(state.view==='video'){void workspace.openLast('video');return;}
  if(state.view==='writer'&&!writer()){workspace.showHome();workspace.newProjectDialog('writing');return;}
  if(state.view==='science'&&!science()){workspace.showHome();workspace.newProjectDialog('science');return;}
-  app.innerHTML=`${workspaceHeader(state.view)}<main class="app-main" id="page"></main><footer class="app-footer"><span id="save-status">${['writer','science'].includes(state.view)?'自动保存':''}</span><span>v0.2.2</span></footer>`;
+  app.innerHTML=`${workspaceHeader(state.view)}<main class="app-main" id="page"></main><footer class="app-footer"><span id="save-status">${['writer','science'].includes(state.view)?'自动保存':''}</span><span>v0.2.3</span></footer>`;
  app.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>navigate(b.dataset.nav));
  installWorkspaceTools(app);
  const page=app.querySelector('#page');

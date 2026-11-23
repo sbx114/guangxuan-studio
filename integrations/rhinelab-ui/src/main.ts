@@ -404,6 +404,8 @@ let audioPreview = false,
   audioPreviewRequest = 0;
 let scene: ArchiveScene | undefined;
 let threeState: "on" | "closing" | "off" | "loading" = "on";
+let startupPreparationState: "loading" | "ready" | "fallback" = "loading";
+let startupPreparationReason = "";
 let resumeCell: { lane: number; row: number } | undefined;
 let resumeSelection = -1;
 let viewer: ModelViewer | undefined;
@@ -1729,7 +1731,10 @@ async function toggleThree() {
 }
 
 async function start() {
-  try {
+  let preparingScene: ArchiveScene | undefined;
+  let abandoned = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const preparation = (async () => {
     if (isWallpaper) await window.rhineWallpaperPropertiesReady;
     // Let the loading surface paint before WebGL setup, and load the original
     // text opening alongside the scene rather than serially after it.
@@ -1743,11 +1748,12 @@ async function start() {
     ) {
       performance.mark("gx:home:scene-start");
       const { ArchiveScene } = await import("./scene");
-      scene = new ArchiveScene($("#three-scene"));
-      scene.setTheme(prefs.colorTheme === "dark", true);
-      scene.setSuperPerformance(superPerformanceEnabled());
-      scene.setQuality(effectiveRenderQuality());
-      scene.setArchiveCoverage(
+      if (abandoned) return;
+      preparingScene = new ArchiveScene($("#three-scene"));
+      preparingScene.setTheme(prefs.colorTheme === "dark", true);
+      preparingScene.setSuperPerformance(superPerformanceEnabled());
+      preparingScene.setQuality(effectiveRenderQuality());
+      preparingScene.setArchiveCoverage(
         wallpaperHost()?.properties.archivecoverage?.value === "extra",
       );
     } else {
@@ -1755,7 +1761,7 @@ async function start() {
       syncThreeButton();
     }
     await Promise.all([
-      scene?.load(),
+      preparingScene?.load(),
       openingReady,
       // With unicode-range faces, preload the opening's actual characters,
       // not every font shard. Other archive text loads on demand.
@@ -1776,23 +1782,72 @@ async function start() {
         "Gx WELCOME TO CREATIVE WORKSPACE",
       ),
     ]);
+    if (abandoned) return;
+    if (preparingScene && !isWallpaper && frozenTime === null) {
+      performance.mark("gx:home:first-frame-start");
+      openingPreparation = preparingScene.prepareFirstFrame(timelineNow());
+      try { await openingPreparation; }
+      finally { openingPreparation = undefined; }
+      if (abandoned) return;
+      if (!preparingScene.getStats().firstFramePreparation.gpuComplete) {
+        throw new Error("HOME_GPU_FRAME_UNCONFIRMED");
+      }
+      performance.mark("gx:home:first-frame-ready");
+    }
+    // Only publish a fully prepared scene. A late model/shader response after
+    // fallback cannot replace the working 2D interface or re-enable its canvas.
+    scene = preparingScene;
     if (scene) bindScene(scene);
     savePrefs();
     selected = preferredWorkspaceIndex(archiveWorkspace, records[selected]?.id);
     if (selected >= 0) select(selected);
     else { scene?.focusWorkspace(workspaceLane(archiveWorkspace)); updateSelection(); }
-    if (scene && !isWallpaper && frozenTime === null) {
-      performance.mark("gx:home:first-frame-start");
-      openingPreparation = scene.prepareFirstFrame(timelineNow());
-      try { await openingPreparation; }
-      finally { openingPreparation = undefined; }
-      performance.mark("gx:home:first-frame-ready");
-    }
     performance.mark("gx:home:scene-ready");
+  })();
+  try {
+    // Decorative models, shader compilation and opening fonts are optional
+    // for project navigation. Some virtual GPUs never finish compileAsync.
+    await Promise.race([
+      preparation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("HOME_PREPARATION_TIMEOUT")), 12000);
+      }),
+    ]);
+    startupPreparationState = "ready";
+  } catch (error) {
+    abandoned = true;
+    startupPreparationState = "fallback";
+    startupPreparationReason = error instanceof Error && error.message === "HOME_PREPARATION_TIMEOUT" ? "timeout" : "unavailable";
+    // Dispose now and again when pending asynchronous resources settle.
+    // They may finish loading after the deadline, but never become active.
+    try { preparingScene?.dispose(); } catch { /* The renderer may already be lost. */ }
+    scene = undefined;
+    threeState = "off";
+    syncThreeButton();
+    $("#three-scene").replaceChildren();
+    performance.mark("gx:home:fallback");
+    console.warn("Gx homepage visual preparation unavailable; using the 2D workspace.", error);
+    const notice = document.createElement("div");
+    notice.className = "home-startup-notice";
+    notice.setAttribute("role", "status");
+    notice.innerHTML = '<span>首页画面未能准备完成，已切换为二维项目界面。</span><button type="button">重新载入首页</button>';
+    notice.querySelector("button")!.addEventListener("click", () => location.reload());
+    $("#viewport").append(notice);
+  } finally {
+    clearTimeout(timer);
+    void preparation.finally(() => {
+      if (abandoned) {
+        try { preparingScene?.dispose(); } catch { /* Pending resources are no longer shown. */ }
+        $("#three-scene").replaceChildren();
+      }
+    }).catch(() => {});
+  }
+  $("#stage").dataset.startupPreparation = startupPreparationState;
+  try {
     ready = true;
     performance.mark("gx:home:ready");
     portalReady();
-    if (entry) entry.ready();
+    if (entry && startupPreparationState !== "fallback") entry.ready();
     else {
       if (isWallpaper) {
         // CEF allows automatic audio; never block the visual on audio policy or decoding.
@@ -1835,6 +1890,7 @@ function completeStartup(silent: boolean) {
   if (reviewParams.get("scene") === "detail") setMode("detail");
   if (isWallpaper && wallpaperHost()?.properties.boot?.value === false)
     setMode("archive");
+  if (startupPreparationState === "fallback") setMode("archive");
   $("#stage").inert = false;
   $(".mobile-entry").inert = false;
   loading.classList.add("loaded");
@@ -2048,6 +2104,7 @@ Object.assign(window, {
       mode,
       ready,
       startup: started ? "started" : (entry?.phase ?? "loading"),
+      startupPreparation: { state: startupPreparationState, reason: startupPreparationReason },
       motion: { reduced: motionIsReduced(), preset: prefs.motionPreset },
       bootTime:
         mode === "boot"

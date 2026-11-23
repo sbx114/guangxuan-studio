@@ -7,7 +7,11 @@
 .entry-silent { min-height: 44px; margin-top: 12px; font-size: 13px; color: #666454; text-decoration: underline; text-underline-offset: 4px; }
 .entry-status { font-size: 12px; color: #777468; line-height: 1.8; margin: 14px 0 0; }
 .loading[data-entry="waiting"] > i:after, .loading[data-entry="error"] > i:after { animation: none; width: 100%; }
+.home-startup-notice { position: fixed; z-index: 12; left: 50%; bottom: 70px; translate: -50% 0; display: flex; align-items: center; gap: 16px; max-width: calc(100vw - 40px); padding: 12px 18px; background: #e8e5e1; border: 1px solid #969183; color: #555c45; font-size: 12px; line-height: 1.8; }
+.home-startup-notice button { flex-shrink: 0; padding: 6px 10px; border: 1px solid #969183; }
+.home-startup-notice button:focus-visible { outline: 2px solid #555c45; outline-offset: 3px; }
 @media (max-width: 600px) {
+  .home-startup-notice { width: calc(100vw - 40px); box-sizing: border-box; flex-direction: column; gap: 4px; bottom: 62px; text-align: center; }
   .loading-mark { width: 125px; margin-bottom: 32px; }
   .loading > span { font-size: 9px; letter-spacing: 1.3px; }
 }

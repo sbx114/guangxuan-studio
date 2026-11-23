@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { link, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createConnectionStore, CONNECTION_SETTINGS_FILENAME } from '../lib/connection-store.mjs';
 import { createWindowsDpapiProtector, WINDOWS_DPAPI_METHOD } from '../lib/windows-dpapi.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const configuration = key => ({ baseUrl: 'https://fixture.invalid/v1', model: 'fixture-model', apiStyle: 'responses', jsonMode: true, timeoutSeconds: 123, ...(key === undefined ? {} : { apiKey: key }) });
 function fakeProtector(options = {}) {
@@ -126,4 +127,20 @@ test('real Windows DPAPI ciphertext survives a fresh Node process without plaint
   });
   assert.equal(result.keyMatches, true); assert.equal(result.encryptionAvailable, true); assert.equal(result.hasSavedKey, true); assert.equal(result.model, 'fixture-model');
   const reopened = await createConnectionStore({ dataDir: f.directory }); await reopened.clear(); await reopened.close(); assert.equal(JSON.parse(await readFile(f.filename, 'utf8')).encryptedApiKey, undefined);
+});
+
+test('a transient DPAPI startup failure does not save a key and a later explicit save recovers real CurrentUser encryption', { skip: process.platform !== 'win32', timeout: 30000 }, async t => {
+  let firstSpawn = true;
+  const protector = createWindowsDpapiProtector({ retryDelayMs: 50, spawnProcess(binary, args, options) { if (firstSpawn) { firstSpawn = false; throw new Error('Synthetic initial process startup failure only'); } return spawn(binary, args, options); } });
+  const f = await fixture(t, protector), key = 'gx-synthetic-startup-recovery-' + randomUUID();
+  const first = await f.store.save({ settings: configuration(key), rememberKey: true });
+  assert.equal(first.encryptionAvailable, false); assert.equal(first.hasSavedKey, false); assert.equal(first.keySaved, false); assert.equal(first.noticeCode, 'DPAPI_PROCESS_UNAVAILABLE');
+  const initialDisk = await readFile(f.filename, 'utf8'); assert.ok(!initialDisk.includes(key)); assert.ok(!initialDisk.includes(Buffer.from(key).toString('base64'))); assert.equal(JSON.parse(initialDisk).encryptedApiKey, undefined);
+  await delay(80);
+  const saved = await f.store.save({ settings: configuration(key), rememberKey: true });
+  assert.equal(saved.encryptionAvailable, true); assert.equal(saved.hasSavedKey, true); assert.equal(saved.keySaved, true);
+  const disk = await readFile(f.filename, 'utf8'); assert.ok(!disk.includes(key)); assert.ok(!disk.includes(Buffer.from(key).toString('base64')));
+  assert.equal((await f.store.load()).settings.apiKey, key);
+  const reopened = await createConnectionStore({ dataDir: f.directory }); t.after(() => reopened.close());
+  assert.equal((await reopened.load()).settings.apiKey, key); assert.equal((await reopened.load()).hasSavedKey, true);
 });

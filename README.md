@@ -30,9 +30,13 @@ Gx 将材料整理、内容写作、动画创作和多轨剪辑放在同一套�
 
 ## 下载安装
 
-当前版本为 **0.2.2 / Windows x64**（2026-11-23 音乐节奏识别与自动卡点增强）。在 [GitHub Releases](https://github.com/sbx114/guangxuan-studio/releases) 获取安装器、便携包、完整源码包和 SHA256 校验文件。
+## 0.2.3 启动与 Windows 可靠性
 
-1. **安装版**：运行 `Gx-0.2.2-Windows-x64-Setup.exe`，选择安装目录。安装面向当前 Windows 账户；从开始菜单的 **Gx** 或安装目录的 **Gx.exe** 打开。
+首页三维资源加载失败、超时或首帧未确认时，会显示原因并开放二维档案、项目搜索和助手入口。Windows 加密组件短暂不可用时，本次保存会明确提示；下一次显式保存可重新检测。文件保存遇到短暂共享锁会有界重试，持续锁定时保留原文件。
+
+当前版本为 **0.2.3 / Windows x64**（2026-11-23 CI、首页降级、DPAPI宿主与文件锁修复）。在 [GitHub Releases](https://github.com/sbx114/guangxuan-studio/releases) 获取安装器、便携包、完整源码包和 SHA256 校验文件。
+
+1. **安装版**：运行 `Gx-0.2.3-Windows-x64-Setup.exe`，选择安装目录。安装面向当前 Windows 账户；从开始菜单的 **Gx** 或安装目录的 **Gx.exe** 打开。
 2. **便携版**：完整解压 Windows x64 程序包，双击 **Gx.exe**。请保留整个目录，运行文件与依赖需一起使用。
 3. **连接模型**：在 **模型连接** 填写服务地址、模型名称和 API 密钥。需要跨次恢复时勾选 **在本机加密保存密钥**，保存后测试连接。
 
@@ -41,7 +45,7 @@ Gx 将材料整理、内容写作、动画创作和多轨剪辑放在同一套�
 发行安装器尚未进行代码签名，可使用发布页的 SHA256 校验下载文件：
 
 ```powershell
-Get-FileHash .\Gx-0.2.2-Windows-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\Gx-0.2.3-Windows-x64-Setup.exe -Algorithm SHA256
 ```
 
 ## 创作与数据
