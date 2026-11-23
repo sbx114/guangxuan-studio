@@ -1,0 +1,27 @@
+name: Windows file lock runtime diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  locks:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Record actual Windows lock and rename stages
+        shell: pwsh
+        run: |
+          $gxOutput = Join-Path $env:RUNNER_TEMP 'gx-file-lock-diagnostic'
+          & node .github/scripts/diagnose-cloud-lock.mjs --source $env:GITHUB_WORKSPACE --output $gxOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload lock diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-file-lock-diagnostic
+          path: ${{ runner.temp }}/gx-file-lock-diagnostic
+          if-no-files-found: error
