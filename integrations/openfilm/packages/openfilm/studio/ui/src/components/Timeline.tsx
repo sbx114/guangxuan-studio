@@ -3032,7 +3032,7 @@ export const Timeline = React.memo(function Timeline({
     return assetHint.ghosts.get(id) ?? { startMs: 0, endMs: 0, gone: true };
   }, [drag.placedOf, assetHint]);
   const clipElements = React.useMemo(() => new Map<string, { pose: string; node: React.ReactElement }>(), [
-    tracks, pxPerMs, waveUrl, mode, msAtClientX, onSplit,
+    tracks, pxPerMs, waveUrl, mode, msAtClientX, onSplit, musicRhythm?.shown, musicRhythm?.states,
     clipThumbs, posters, mediaTrouble, t, openBlockMenu, onEditBlocks, collapseIfClick, selectOne, setSelected,
     drag.start, drag.can, withLinked, runSplit, pickForTrim, startFade, startVolume, onEditOps,
   ]);
@@ -3572,6 +3572,7 @@ export const Timeline = React.memo(function Timeline({
     chatClip, chatDraft, placedOf, pickForTrim, gap, withLinked, runSplit, trackOverlay,
     fadeOfBlock, fadeDrag, startFade, volumeDrag, startVolume, transitions, transitionDrag, pickedTransition, onPickTransition, onTransition, startTransitionResize,
     nearFirst, nearLast, speedOn, hoveredBlock, onEnterCompound, snap, allBlocks, onSeek, totalMs, transcribed, captionPick,
+    musicRhythm?.shown, musicRhythm?.states,
   ]);
 
   const tickMarks = React.useMemo(() => ticks.map(({ ms, label }) => {

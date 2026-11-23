@@ -29,8 +29,15 @@ test('actual Gx music rhythm UI draws real points, toggles them, and completes h
   const native = await until(async () => { const f = page.frames().find(frame => /\/projects\//.test(frame.url())); return f && await f.locator('[data-rhythm-point]').count() >= 12 ? f : null; }, Boolean);
   const song = native.locator('[data-block-id]').filter({ has: native.locator('[data-music-rhythm-lines]') }).first(); await song.click();
   assert.match(await native.locator('[data-music-rhythm-status]').innerText(), /120 BPM/); assert.equal(await native.locator('[data-rhythm-cut]').isDisabled(), false);
-  await native.getByLabel('显示音乐节奏点').uncheck(); await until(() => native.locator('[data-rhythm-point]').count(), count => count === 0); await native.getByLabel('显示音乐节奏点').check(); await native.locator('[data-rhythm-point]').first().waitFor();
   const film = path.join(dataDir, 'openfilm/projects', id, 'film.html'), before = await fs.readFile(film, 'utf8');
+  const beatTimes = await native.locator('[data-rhythm-point]').evaluateAll(points => points.map(point => point.getAttribute('data-rhythm-point')));
+  for (let toggle = 0; toggle < 3; toggle++) {
+    await native.getByLabel('显示音乐节奏点').uncheck(); await until(() => native.locator('[data-rhythm-point]').count(), count => count === 0);
+    await native.getByLabel('显示音乐节奏点').check(); await native.locator('[data-rhythm-point]').first().waitFor();
+    await until(() => native.locator('[data-rhythm-point]').count(), count => count === beatTimes.length);
+    assert.deepEqual(await native.locator('[data-rhythm-point]').evaluateAll(points => points.map(point => point.getAttribute('data-rhythm-point'))), beatTimes);
+  }
+  assert.equal(await fs.readFile(film, 'utf8'), before, 'Showing rhythm guides must not edit the film');
   await native.locator('[data-rhythm-cut]').click(); await native.locator('[data-rhythm-undo]').waitFor({ timeout: 60000 }); assert.notEqual(await fs.readFile(film, 'utf8'), before);
   await native.locator('[data-rhythm-undo]').click(); await until(() => native.locator('[data-music-cut-status]').innerText(), value => value.includes('已撤销')); assert.equal(await fs.readFile(film, 'utf8'), before);
   const direct = await browser.newPage({ viewport: { width: 1360, height: 950 }, locale: 'zh-CN' }); await direct.goto(native.url()); const standaloneSong = direct.locator('[data-block-id]').filter({ has: direct.locator('[data-music-rhythm-lines]') }).first(); await standaloneSong.waitFor({ timeout: 60000 }); await standaloneSong.click(); assert.equal(await direct.locator('[data-rhythm-cut]').isDisabled(), true);
