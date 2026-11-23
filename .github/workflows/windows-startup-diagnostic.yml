@@ -1,0 +1,32 @@
+name: Windows startup runtime diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  startup:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install runtime dependencies
+        shell: pwsh
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Record actual Edge startup states
+        shell: pwsh
+        run: |
+          $gxOutput = Join-Path $env:RUNNER_TEMP 'gx-ui-startup-diagnostic'
+          & node .github/scripts/ui-startup-diagnostic.mjs --source $env:GITHUB_WORKSPACE --output $gxOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload startup diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-startup-diagnostic
+          path: ${{ runner.temp }}/gx-ui-startup-diagnostic
+          if-no-files-found: error
