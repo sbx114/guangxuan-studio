@@ -8,11 +8,29 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Prepare canonical test directories and fonts
+        shell: pwsh
+        run: |
+          $gxTestRoot = Join-Path $env:RUNNER_TEMP 'gx-tests'
+          New-Item -ItemType Directory -Path $gxTestRoot -Force | Out-Null
+          $gxTestRoot = & node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' $gxTestRoot
+          if ($LASTEXITCODE -ne 0 -or -not $gxTestRoot) { throw 'Canonical test directory could not be resolved.' }
+          foreach ($gxName in @('TEMP', 'TMP', 'GUANGXUAN_TEST_DIR', 'GUANGXUAN_TEST_TMP')) {
+            "$gxName=$gxTestRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          $gxFontCache = Join-Path $gxTestRoot 'font-cache'
+          New-Item -ItemType Directory -Path $gxFontCache -Force | Out-Null
+          $gxFonts = [Security.SecurityElement]::Escape((Join-Path $env:WINDIR 'Fonts').Replace('\', '/'))
+          $gxCache = [Security.SecurityElement]::Escape($gxFontCache.Replace('\', '/'))
+          $gxFontConfig = Join-Path $gxTestRoot 'fonts.conf'
+          "<?xml version='1.0'?><fontconfig><dir>$gxFonts</dir><cachedir>$gxCache</cachedir></fontconfig>" | Set-Content -LiteralPath $gxFontConfig -Encoding utf8
+          "FONTCONFIG_FILE=$gxFontConfig" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install render dependencies
         shell: pwsh
         env:
@@ -25,7 +43,17 @@ jobs:
           "GUANGXUAN_BIN_DIR=$ffmpegDirectory/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Run backend tests
         shell: pwsh
-        run: node --test tests/*.test.mjs
+        run: |
+          $gxTestLog = Join-Path $env:GUANGXUAN_TEST_DIR 'backend-tests.tap'
+          & node --test --test-reporter=tap --test-concurrency=1 tests/*.test.mjs 2>&1 | Tee-Object -FilePath $gxTestLog
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-backend-test-evidence
+          path: ${{ runner.temp }}/gx-tests/backend-tests.tap
+          if-no-files-found: warn
       - name: Build portable desktop application
         shell: pwsh
         run: ./scripts/build-windows.ps1 -PublicDistribution -CreateZip
